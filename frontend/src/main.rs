@@ -399,7 +399,7 @@ fn app() -> Html {
     let searching = use_state(|| false);
     let search_results = use_state(Vec::<serde_json::Value>::new);
     let providers = use_state(HashMap::<String, Value>::new);
-    let selected_provider = use_state(|| "torrentgalaxy".to_string());
+    let selected_provider = use_state(|| "thepiratebay".to_string());
 
     {
         let state = state.clone();
@@ -831,8 +831,8 @@ fn app() -> Html {
                                             let peers  = str_field("peers");
                                             html! {
                                                 <tr>
-                                                    <td>{ name }</td>
-                                                    <td>{ size }</td>
+                                                    <td class="name">{ name }</td>
+                                                    <td class="right aligned">{ size }</td>
                                                     <td>{ format!("{}/{}", seeds, peers) }</td>
                                                     <td>
                                                         <button class="ui tiny blue icon button" onclick={let magnet = magnet.clone(); Callback::from(move |_| {

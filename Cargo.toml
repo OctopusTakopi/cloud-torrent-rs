@@ -15,7 +15,7 @@ serde_yaml = "0.9"
 redb = "3"
 regex = "1"
 scraper = "0.25"
-rust-embed = "8.6"
+rust-embed = "8.11"
 librqbit = "8"
 zip = "8.1"
 tokio-util = { version = "0.7", features = ["io"] }
@@ -45,6 +45,7 @@ urlencoding = "2.1"
 base64 = "0.22.1"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 hyper-util = { version = "0.1.20", features = ["server-auto"] }
+thiserror = "2"
 
 # For musl/static targets, force openssl to vendor its own copy so no system OpenSSL is needed.
 # Use: RUSTFLAGS="-C target-feature=+crt-static" cargo build --target x86_64-unknown-linux-musl

@@ -7,31 +7,34 @@
   text-align: center;
 }
 
-.omni .results {
-  max-height: 200px;
+#omni_search_results .results {
+  max-height: 400px;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   padding-bottom: 2rem;
 }
 
-.omni .results .name {
-  /*font-size: .75em;*/
-  text-align: right;
+#omni_search_results .results .name {
+  text-align: left;
+  word-break: break-all;
+  max-width: 0;
+  width: 60%;
 }
 
-.omni .results .users {
+#omni_search_results .results .users {
   width: 75px;
   text-align: center;
 }
-.omni .results .seeds {
+
+#omni_search_results .results .seeds {
   color: #5bbd72;
 }
 
-.omni .results .peers {
+#omni_search_results .results .peers {
   color: rgb(176, 127, 20);
 }
 
-.omni .results .loadmore {
+#omni_search_results .results .loadmore {
   margin-top: 1rem;
 }
 

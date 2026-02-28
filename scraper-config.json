@@ -1,185 +1,54 @@
 {
-  "torrentgalaxy": {
-    "name": "TorrentGalaxy",
-    "url": "https://torrentgalaxy.to/torrents.php?search={{query}}&sort=id&order=desc&page={{page:0}}",
-    "list": "div.tgxtablerow",
-    "result": {
-      "name": [
-        "div:nth-of-type(4) div a",
-        "@title"
-      ],
-      "url": [
-        "div:nth-of-type(4) div a",
-        "@href"
-      ],
-      "size": "div:nth-of-type(8)",
-      "seeds": "div:nth-of-type(10)"
-    }
-  },
-  "torrentgalaxy/item": {
-    "name": "TorrentGalaxy/item",
-    "url": "https://torrentgalaxy.to{{item}}",
-    "result": {
-      "infohash": [
-        "div.torrentpagetable div.tprow:nth-of-type(7) div:nth-of-type(2)"
-      ]
-    }
-  },
-  "idope": {
-    "name": "iDope",
-    "url": "https://idope.se/torrent-list/{{query}}/?p={{page:1}}",
-    "list": "div#div2child .resultdiv",
-    "result": {
-      "name": [
-        ".resultdivtop a div.resultdivtopname",
-        "s/[\n\t]+//g"
-      ],
-      "url": [
-        "div.resultdivtop a",
-        "@href"
-      ],
-      "size": ".resultlength .resultdivbottonlength",
-      "seeds": ".resultseed .resultdivbottonseed"
-    }
-  },
-  "idope/item": {
-    "name": "iDope(Item)",
-    "url": "https://idope.se/torrent/{{item}}",
-    "result": {
-      "magnet": "a#mangetinfo"
-    }
-  },
   "eztv": {
     "name": "EZTV",
-    "url": "https://eztv.ag/search/{{query}}",
+    "url": "https://eztvx.to/search/{{query}}",
     "list": "table tr.forum_header_border",
     "result": {
-      "name": "td:nth-child(2) a",
+      "name": "a.epinfo",
       "url": [
-        "td:nth-child(2) a",
+        "a.epinfo",
         "@href"
       ],
       "magnet": [
-        "td:nth-child(3) a:nth-child(1)",
+        "a.magnet",
         "@href"
       ],
-      "size": "td:nth-child(4)",
-      "seeds": "td:nth-child(6)"
-    }
-  },
-  "1337x": {
-    "name": "1337X",
-    "url": "https://1337x.to/sort-search/{{query}}/seeders/desc/{{page:1}}/",
-    "list": "table.table-list tbody tr",
-    "result": {
-      "name": "td.coll-1 a:nth-child(2)",
-      "url": [
-        "td.coll-1 a:nth-child(2)",
-        "@href"
-      ],
-      "seeds": "td.coll-2",
-      "peers": "td.coll-3",
-      "size": [
-        "td.coll-4",
-        "/([\\d\\.]+ [KMGT]?B)/"
-      ]
-    }
-  },
-  "1337x/item": {
-    "name": "1337X (Item)",
-    "url": "https://1337x.to{{item}}",
-    "result": {
-      "magnet": [
-        "a[href^=\"magnet:\"]",
-        "@href"
-      ]
-    }
-  },
-  "abb": {
-    "name": "The Audiobook Bay",
-    "url": "http://audiobookbay.nl/page/{{page:1}}?s={{query}}",
-    "list": "#content > .post",
-    "result": {
-      "name": [
-        "div.postTitle > h2 > a"
-      ],
-      "url": [
-        "div.postTitle > h2 > a",
-        "@href"
-      ],
-      "size": [
-        "div.postContent",
-        "/File Size: ([\\d\\.]+ [KMGT]?B)/"
-      ]
-    }
-  },
-  "abb/item": {
-    "name": "The Audiobook Bay (Item)",
-    "url": "http://audiobookbay.nl{{item}}",
-    "result": {
-      "infohash": "/td>([a-f0-9]+)</",
-      "tracker": "table.torrent_info tr:nth-child(1) td:nth-child(2)"
-    }
-  },
-  "lt": {
-    "name": "limetorrents",
-    "url": "https://www.limetorrents.lol/search/all/{{query}}/seeds/{{page:1}}/",
-    "list": ".table2 tbody tr",
-    "result": {
-      "name": [
-        ".tt-name a:nth-child(2)"
-      ],
-      "url": [
-        ".tt-name a:nth-child(2)",
-        "@href"
-      ],
-      "size": "td:nth-child(3)",
-      "seeds": "td:nth-child(4)",
-      "peers": "td:nth-child(5)"
-    }
-  },
-  "lt/item": {
-    "name": "limetorrents (Item)",
-    "url": "https://www.limetorrents.lol{{item}}",
-    "result": {
-      "magnet": [
-        "a.csprite_dltorrent[href^=\"magnet:\"]",
-        "@href"
-      ]
-    }
-  },
-  "tpb": {
-    "name": "The Pirate Bay",
-    "url": "https://apibay.org/q.php?q={{query}}&cat=",
-    "json": true,
-    "result": {
-      "name": "name",
-      "info_hash": "info_hash",
-      "size": "size",
-      "seeds": "seeders",
-      "peers": "leechers"
+      "size": "td:nth-of-type(4)",
+      "seeds": "td:nth-of-type(6) font"
     }
   },
   "nyaa": {
     "name": "Nyaa",
-    "url": "https://nyaa.si/?f=0&c=0_0&s=seeders&o=desc&q={{query}}&p={{page:1}}",
+    "url": "https://nyaa.si/?f=0&c=0_0&s=seeders&o=desc&q={{query}}&p=1",
     "list": "table.torrent-list > tbody > tr",
     "result": {
       "name": [
-        "td:nth-child(2) a:nth-child(2)",
-        "@title"
+        "td:nth-of-type(2) a:not([class])",
+        ""
       ],
       "path": [
-        "td:nth-child(2) a:nth-child(2)",
+        "td:nth-of-type(2) a:not([class])",
         "@href"
       ],
       "magnet": [
-        "a[href^='magnet:']",
+        "td:nth-of-type(3) a[href^=\"magnet:\"]",
         "@href"
       ],
-      "size": "td:nth-child(4)",
-      "seeds": "td:nth-child(6)",
-      "peers": "td:nth-child(7)"
+      "size": "td:nth-of-type(4)",
+      "seeds": "td:nth-of-type(6)",
+      "peers": "td:nth-of-type(7)"
+    }
+  },
+  "thepiratebay": {
+    "name": "The Pirate Bay",
+    "url": "https://apibay.org/q.php?q={{query}}&cat=0",
+    "json": true,
+    "result": {
+      "name": "name",
+      "infohash": "info_hash",
+      "size": "size",
+      "seeds": "seeders",
+      "peers": "leechers"
     }
   },
   "uindex": {
@@ -187,9 +56,7 @@
     "url": "https://uindex.org/search.php?search={{query}}",
     "list": "table.maintable tr:not(:first-child)",
     "result": {
-      "name": [
-        "td:nth-child(2) a[href^='/details.php']"
-      ],
+      "name": "td:nth-child(2) a[href^='/details.php']",
       "url": [
         "td:nth-child(2) a[href^='/details.php']",
         "@href"
