@@ -53,7 +53,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-r
 To install a specific version:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-rs/master/scripts/quickinstall.sh) v1.0.1
+bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-rs/master/scripts/quickinstall.sh) v1.0.2
 ```
 
 The script installs the binary to `/usr/local/bin/cloud-torrent` and registers a systemd service.  

@@ -20,6 +20,7 @@ use std::convert::Infallible;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use sysinfo::{Disks, System};
+use tower::ServiceExt;
 use tower_http::cors::CorsLayer;
 // Use a local definition of ServeDir if needed, but we'll use our embedded assets
 // use tower_http::services::ServeDir;
@@ -394,6 +395,7 @@ fn list_files_recursive(path: &str) -> anyhow::Result<serde_json::Value> {
 async fn serve_download(
     axum::extract::Path(path): axum::extract::Path<String>,
     State((state, _)): State<(Arc<AppState>, tokio::sync::broadcast::Sender<()>)>,
+    req: Request,
 ) -> impl IntoResponse {
     let config = state.engine.get_config().await;
     let full_path =
@@ -434,16 +436,15 @@ async fn serve_download(
             .into_response();
     }
 
-    match tokio::fs::read(&full_path).await {
-        Ok(content) => {
-            let mime = mime_guess::from_path(&full_path).first_or_octet_stream();
-            Response::builder()
-                .header(header::CONTENT_TYPE, mime.as_ref())
-                .body(axum::body::Body::from(content))
-                .unwrap()
-                .into_response()
+    match tower_http::services::ServeFile::new(&full_path)
+        .oneshot(req)
+        .await
+    {
+        Ok(res) => res.into_response(),
+        Err(err) => {
+            tracing::error!("Error serving file: {}", err);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error serving file").into_response()
         }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Error reading file").into_response(),
     }
 }
 
