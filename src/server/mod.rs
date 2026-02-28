@@ -1,4 +1,4 @@
-use crate::engine::Engine;
+use crate::engine::{Engine, build_http_client};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
     Json, Router,
@@ -34,7 +34,7 @@ fn load_scraper_config_sync() -> String {
 
 async fn load_scraper_config(remote_url: &str) -> String {
     if !remote_url.is_empty()
-        && let Ok(resp) = reqwest::get(remote_url).await
+        && let Ok(resp) = build_http_client().get(remote_url).send().await
         && let Ok(text) = resp.text().await
         && !text.trim().is_empty()
     {
@@ -334,7 +334,7 @@ async fn api_rss(
     if config.rss_url.is_empty() {
         return Json(vec![]);
     }
-    if let Ok(resp) = reqwest::get(&config.rss_url).await
+    if let Ok(resp) = build_http_client().get(&config.rss_url).send().await
         && let Ok(_text) = resp.text().await
     {
         // Parsing would go here
@@ -587,9 +587,7 @@ async fn search_scraper(
     let url = url_tpl.replace("{{query}}", &urlencoding::encode(query));
     let url = url.replace("{{page:0}}", "0").replace("{{page:1}}", "1");
 
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
-        .build()?;
+    let client = build_http_client();
 
     let resp = client.get(&url).send().await?.text().await?;
 

@@ -51,6 +51,16 @@ pub struct Engine {
     pub db: Arc<Database>,
 }
 
+/// Build a consistent HTTP client that prefers IPv4 over IPv6.
+/// This prevents failures on machines where IPv6 is available in DNS but broken at the network level.
+pub fn build_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+        .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+        .build()
+        .unwrap_or_default()
+}
+
 fn parse_rate(rate: &str) -> Option<u32> {
     if rate.is_empty() || rate == "0" {
         return None;
@@ -542,9 +552,7 @@ impl Engine {
 
         if final_magnet.starts_with("http://") || final_magnet.starts_with("https://") {
             tracing::info!("Fetching HTTP torrent from {}", final_magnet);
-            let client = reqwest::Client::builder()
-                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
-                .build()?;
+            let client = build_http_client();
             let resp = client.get(&final_magnet).send().await?;
             let bytes = resp.bytes().await?.to_vec();
             return self.add_torrent_bytes(bytes).await;
@@ -794,7 +802,7 @@ impl Engine {
         }
 
         tracing::info!("Fetching remote tracker list: {}", url);
-        match reqwest::get(url).await {
+        match build_http_client().get(url).send().await {
             Ok(resp) => {
                 if let Ok(text) = resp.text().await {
                     let list: Vec<String> = text
