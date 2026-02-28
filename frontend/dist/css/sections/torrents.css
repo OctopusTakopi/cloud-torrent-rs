@@ -1,0 +1,93 @@
+section.torrents {
+	margin-bottom: 20px;
+}
+
+.torrent {
+	opacity: 0.95;
+	min-height: 10px;
+}
+
+.torrent.open {
+	opacity: 1
+}
+
+.torrent .info .name,
+.torrent .info .hash {
+	text-overflow: ellipsis;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.torrent .info .name {
+	font-size: 1.2rem;
+	margin-bottom: 2rem;
+}
+
+.torrent .info .starttime {
+	font-size: 0.75rem;
+}
+
+.torrent .info .speed {
+	margin-top: 0.5rem;
+	font-size: 0.75rem;
+}
+
+.torrent .info .speed span.label {
+	margin-bottom: 0.5em;
+}
+
+.torrent .info .progress {
+    margin-top: 0.25rem;
+    margin-bottom: 0;
+}
+
+.torrent .status {
+	margin-top: 1.3rem;
+}
+
+.torrent .status .muted {
+	color: lightgray;
+}
+
+.torrent .torrentinfobar .label {
+	margin-left: 0.1em;
+	margin-bottom: 0.5em;
+}
+
+.torrent .controls.column {
+	/*padding-top: 5px;*/
+	text-align: right;
+}
+
+.torrent .stopped.row .column {
+	padding: 0 100px;
+	text-align: center;
+	font-size: 0.75rem;
+}
+
+.torrent .download.file td.name > div.progress {
+	font-weight: bold;
+	font-size: small;
+	margin: 0;
+}
+
+.torrent .download.file td.name > div.progress div.bar {
+	height: 0.8em;
+}
+
+.torrent .download.file .name .percent {
+	display: inline-block;
+	width: 60px;
+}
+
+.torrent .download.file span.name {
+	overflow: hidden;
+}
+
+.torrent .downloads thead tr th.size {
+	width: 110px;
+}
+.torrent .downloads tfoot tr th {
+	font-weight: bold;
+	font-size: 0.85rem;
+}

@@ -1,0 +1,70 @@
+.omni {
+  margin-top: 5px;
+}
+
+.omni .buttons {
+  margin-top: 0.5rem;
+  text-align: center;
+}
+
+.omni .results {
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 2rem;
+}
+
+.omni .results .name {
+  /*font-size: .75em;*/
+  text-align: right;
+}
+
+.omni .results .users {
+  width: 75px;
+  text-align: center;
+}
+.omni .results .seeds {
+  color: #5bbd72;
+}
+
+.omni .results .peers {
+  color: rgb(176, 127, 20);
+}
+
+.omni .results .loadmore {
+  margin-top: 1rem;
+}
+
+#omni_search_results .result_header {
+  padding: 10px 14px;
+}
+
+#omni_search_results .result_header .close_icon .icon {
+  margin-top: 3px;
+  margin-right: 0;
+}
+
+.omni .search select {
+  padding: 0 10px;
+  margin-top: 0px;
+  border-radius: 4px;
+  height: 32px;
+  cursor: pointer;
+}
+
+.omni .search div.button {
+  height: 32px;
+  padding-top: 11px;
+}
+
+.omni .form {
+  margin-top: 5px;
+}
+
+.icon-wrapper {
+  z-index: 6;
+  position: absolute;
+  right: 0;
+  padding: 10px;
+  cursor: pointer;
+}

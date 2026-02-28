@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Cloud Torrent-rs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" type="text/css" href="/css/Lato/Lato.css">
+    <link rel="stylesheet" type="text/css" href="/css/semantic.min.css">
+    <link rel="stylesheet" type="text/css" href="/css/sections/omni.css">
+    <link rel="stylesheet" type="text/css" href="/css/sections/torrents.css">
+    <link rel="stylesheet" type="text/css" href="/css/sections/downloads.css">
+    <link rel="stylesheet" type="text/css" href="/css/app.css">
+    <link rel="icon" href="/cloud-favicon.png" type="image/x-icon" />
+    
+    
+    
+<link rel="modulepreload" href="/cloud-torrent-frontend-97263a3a797b82cf.js" crossorigin="anonymous" integrity="sha384-R5W9eFVt3vwN++zC8gh+MTq1PZD63drwKH7Mspn2EWo+WGSwjnzLq23tUsNWeU65"><link rel="preload" href="/cloud-torrent-frontend-97263a3a797b82cf_bg.wasm" crossorigin="anonymous" integrity="sha384-QK1xZaoGADXRX5QoorYRODv0OGmnGdxkior0odpDajWNstCBkTQkibfnfwaSaAtG" as="fetch" type="application/wasm"></head>
+<body>
+    <div id="yew-app"></div>
+
+<script type="module">
+import init, * as bindings from '/cloud-torrent-frontend-97263a3a797b82cf.js';
+const wasm = await init({ module_or_path: '/cloud-torrent-frontend-97263a3a797b82cf_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script></body>
+</html>

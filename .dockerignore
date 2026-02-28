@@ -1,0 +1,8 @@
+target/
+frontend/dist/
+frontend/target/
+.git/
+release/
+downloads/
+*.gz
+*.exe

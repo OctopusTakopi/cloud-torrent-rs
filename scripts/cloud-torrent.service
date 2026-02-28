@@ -1,0 +1,33 @@
+[Unit]
+Description=Cloud Torrent (Rust)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Set this to where the binary and config will live
+WorkingDirectory=~
+
+# --- Auth (user:password) ---
+# Environment=AUTH=user:ctorrent
+
+# --- Listen address (TCP or unix socket) ---
+Environment=LISTEN=0.0.0.0:3000
+
+# --- Download directory ---
+Environment=DOWNLOAD_DIR=%h/downloads
+
+# --- TLS (optional) ---
+# Environment=CERT_PATH=/etc/ssl/certs/cloud-torrent.crt
+# Environment=KEY_PATH=/etc/ssl/private/cloud-torrent.key
+
+ExecStart=/usr/local/bin/cloud-torrent
+Restart=always
+RestartPreventExitStatus=42
+RestartSec=3
+
+# Uncomment to increase file descriptor limits for non-root users:
+# LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

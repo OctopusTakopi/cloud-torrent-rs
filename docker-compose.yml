@@ -1,0 +1,16 @@
+version: '3'
+services:
+  service.cloudtorrent:
+    image: octopustakopi/cloud-torrent-rs
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "50007:50007"
+      - "50007:50007/udp"
+    environment:
+      TITLE: "Cloud Torrent-rs"
+      LISTEN: "0.0.0.0:3000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./cloud-torrent.yaml:/app/cloud-torrent.yaml

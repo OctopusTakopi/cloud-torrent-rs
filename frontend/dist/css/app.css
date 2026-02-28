@@ -1,0 +1,177 @@
+/* global styles  */
+
+html,
+body {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.cage {
+  padding-top: 25px;
+  padding-bottom: 40px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+@media (min-width: 740px) {
+  .app .connect-warning {
+    margin-top: 4.5rem;
+  }
+}
+
+@media (max-width: 740px) {
+  .cage {
+    margin: 0 10px;
+    padding-top: 10px;
+  }
+  .app .connect-warning {
+    margin-top: 3rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body .title a {
+    font-size: 1.65rem;
+  }
+}
+
+html body .muted {
+  color: gray;
+}
+
+footer {
+  margin-top: 2rem;
+  text-align: right;
+  color: grey;
+  font-style: italic;
+  font-size: 0.8em;
+  opacity: 0.5;
+  transition: opacity 0.3s ease-in-out;
+}
+
+footer:hover {
+  opacity: 1;
+}
+
+.ellipsis {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+[ng-click] {
+  cursor: pointer;
+}
+
+.disabled {
+  cursor: default !important;
+}
+
+.app .connect-warning {
+  padding-top: 50px;
+  position: fixed;
+  z-index: 10000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 1);
+  opacity: 0.95;
+}
+
+/*
+	================
+	app styles
+*/
+
+.title {
+  position: relative;
+}
+
+.title a {
+  font-size: 2.35rem;
+}
+
+.title .status {
+  position: absolute;
+  top: 0.1rem;
+  right: -0.2rem;
+}
+
+.app .config form.edit {
+  margin-bottom: 1rem;
+}
+
+.app .config form.edit input {
+  font-family: monospace;
+}
+
+.app .config form.edit .buttons {
+  text-align: center;
+}
+
+.section-header {
+  margin-top: 20px !important;
+}
+
+.section-header div[class*="right floated"] {
+  float: right !important;
+}
+
+table.tcld .name {
+  text-align: right !important;
+  word-break: break-all;
+}
+
+.uploads .upload .size {
+  width: 100px;
+}
+
+[onfileclick] {
+  cursor: pointer;
+}
+
+[ondropfile] {
+  position: relative;
+}
+
+[ondropfile] .file-drop-cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 102%;
+  margin-top: 1%;
+  margin-left: -1%;
+  pointer-events: none;
+  background: rgba(173, 216, 230, 0.5);
+  opacity: 0;
+  transition: opacity ease 0.3s;
+  z-index: 5;
+  overflow: hidden;
+}
+
+[ondropfile] .file-drop-cover.shown {
+  opacity: 1;
+}
+
+[ondropfile] .file-drop-cover .dots {
+  height: 100%;
+  border: 1px dotted #333;
+  border-radius: 3px;
+}
+
+[ondropfile] .file-drop-cover .dots .msg {
+  position: absolute;
+  text-align: center;
+  font-size: 2em;
+  left: 0;
+  top: 30px;
+  width: 100%;
+}
+
+[ng-cloak] {
+  display: none;
+}

@@ -1,0 +1,46 @@
+name: docker build
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    if: github.repository_owner == 'OctopusTakopi'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get tag to build
+        id: tag
+        run: |
+          latest_tag=$(git describe --tags | cut -d- -f1)
+          echo "Use the latest release tag: ${latest_tag}"
+          echo "tag=${latest_tag}" >> $GITHUB_OUTPUT
+
+      - name: Prepare environment variables
+        id: prepare
+        run: |
+          echo "docker_platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+          echo "docker_image=octopustakopi/cloud-torrent-rs" >> $GITHUB_OUTPUT
+          echo "docker_tag=${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Build tag & latest release
+        run: |
+          docker buildx build --platform ${{ steps.prepare.outputs.docker_platforms }} \
+          --output "type=image,push=true" \
+          --tag "${{ steps.prepare.outputs.docker_image }}:${{ steps.prepare.outputs.docker_tag }}" \
+          --tag "${{ steps.prepare.outputs.docker_image }}:latest" \
+          --file Dockerfile .

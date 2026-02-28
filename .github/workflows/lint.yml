@@ -1,0 +1,38 @@
+name: lint
+on: [push, pull_request]
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    container: rust:1-bookworm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: apt-get update && apt-get install -y pkg-config libssl-dev
+
+      - name: Install wasm32 target & trunk
+        run: |
+          rustup target add wasm32-unknown-unknown
+          ARCH=$(uname -m)
+          case "${ARCH}" in
+            x86_64) TRUNK_ARCH="x86_64" ;;
+            aarch64) TRUNK_ARCH="aarch64" ;;
+            *) TRUNK_ARCH="x86_64" ;;
+          esac
+          curl -L "https://github.com/thedodd/trunk/releases/download/v0.21.14/trunk-${TRUNK_ARCH}-unknown-linux-gnu.tar.gz" \
+            | tar -xzf- -C /usr/local/bin
+
+      - name: Check Formatting
+        run: rustup component add rustfmt clippy && cargo fmt -- --check
+
+      - name: Run Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check Frontend Formatting
+        run: cd frontend && cargo fmt -- --check
+
+      - name: Clippy Frontend
+        run: cd frontend && cargo clippy --target wasm32-unknown-unknown -- -D warnings
