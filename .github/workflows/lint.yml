@@ -28,6 +28,11 @@ jobs:
       - name: Check Formatting
         run: rustup component add rustfmt clippy && cargo fmt -- --check
 
+      - name: Build Frontend (required for RustEmbed)
+        run: |
+          cd frontend
+          trunk build --release
+
       - name: Run Clippy
         run: cargo clippy -- -D warnings
 
