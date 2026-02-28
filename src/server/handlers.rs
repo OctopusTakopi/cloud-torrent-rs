@@ -1,4 +1,3 @@
-use crate::engine::Engine;
 use crate::server::scraper::search_scraper;
 use crate::server::state::AppState;
 use crate::server::types::{AppError, AppResult, FileNode, MagnetQuery, SearchQuery};
@@ -14,7 +13,7 @@ use futures::stream;
 use std::convert::Infallible;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use sysinfo::{Disks, System};
+use sysinfo::Disks;
 use tower::ServiceExt;
 
 pub async fn sync_handler(
@@ -46,7 +45,7 @@ pub async fn sync_handler(
 }
 
 pub async fn get_global_state(state: &AppState) -> GlobalState {
-    let stats_val = get_system_stats(&state.engine).await;
+    let stats_val = get_system_stats(state).await;
     GlobalState {
         use_queue: false,
         latest_rss_guid: "".to_string(),
@@ -56,9 +55,12 @@ pub async fn get_global_state(state: &AppState) -> GlobalState {
     }
 }
 
-pub async fn get_system_stats(engine: &Engine) -> serde_json::Value {
-    let mut sys = System::new_all();
-    sys.refresh_all();
+pub async fn get_system_stats(state: &AppState) -> serde_json::Value {
+    let mut sys = state.sys.lock().await;
+
+    // Only refresh what's needed for better performance
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
 
     let app_memory = sysinfo::get_current_pid()
         .ok()
@@ -66,6 +68,7 @@ pub async fn get_system_stats(engine: &Engine) -> serde_json::Value {
         .map(|p| p.memory())
         .unwrap_or(0);
 
+    let engine = &state.engine;
     let config = engine.get_config().await;
     let download_dir = std::path::Path::new(&config.download_directory);
     let abs_path = if download_dir.is_absolute() {
@@ -141,12 +144,15 @@ pub async fn api_rss(State(state): State<Arc<AppState>>) -> Json<Vec<serde_json:
 
 pub async fn api_files(State(state): State<Arc<AppState>>) -> AppResult<Json<FileNode>> {
     let config = state.engine.get_config().await;
-    let root = list_files_recursive(&config.download_directory)?;
+    let root = list_files_recursive(&config.download_directory).await?;
     Ok(Json(root))
 }
 
-fn list_files_recursive(path: &str) -> AppResult<FileNode> {
-    let metadata = std::fs::metadata(path).map_err(|e| AppError::NotFound(e.to_string()))?;
+#[async_recursion::async_recursion]
+async fn list_files_recursive(path: &str) -> AppResult<FileNode> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| AppError::NotFound(e.to_string()))?;
     let name = std::path::Path::new(path)
         .file_name()
         .unwrap_or_default()
@@ -159,13 +165,13 @@ fn list_files_recursive(path: &str) -> AppResult<FileNode> {
     if metadata.is_dir() {
         size = 0;
         let mut child_nodes = vec![];
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
+        if let Ok(mut entries) = tokio::fs::read_dir(path).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
                 let file_name = entry.file_name();
                 if file_name.to_string_lossy().starts_with('.') {
                     continue;
                 }
-                if let Ok(child) = list_files_recursive(&entry.path().to_string_lossy()) {
+                if let Ok(child) = list_files_recursive(&entry.path().to_string_lossy()).await {
                     size += child.size;
                     child_nodes.push(child);
                 }
@@ -354,7 +360,7 @@ pub async fn api_torrents(State(state): State<Arc<AppState>>) -> Json<Vec<Torren
 }
 
 pub async fn api_stat(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    Json(get_system_stats(&state.engine).await)
+    Json(get_system_stats(state.as_ref()).await)
 }
 
 pub async fn api_search(

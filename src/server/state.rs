@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 pub struct AppState {
     pub engine: Engine,
     pub expected_auth: Option<String>,
+    pub sys: tokio::sync::Mutex<sysinfo::System>,
 }
 
 #[derive(Clone)]

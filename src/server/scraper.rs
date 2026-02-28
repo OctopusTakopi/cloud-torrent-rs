@@ -62,7 +62,7 @@ pub async fn search_scraper(
     };
 
     let re_page = regex::Regex::new(r"\{\{page:(\d+)\}\}").unwrap();
-
+    let search_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
     let mut futures = vec![];
     for p in providers {
         if let Some(p_conf) = config.get(&p) {
@@ -71,7 +71,9 @@ pub async fn search_scraper(
             let query = query.to_string();
             let p_name = p.clone();
             let re_page = re_page.clone();
+            let search_semaphore = search_semaphore.clone();
             futures.push(async move {
+                let _permit = search_semaphore.acquire().await;
                 let url_tpl = p_conf.get("url").and_then(|v| v.as_str()).unwrap_or("");
                 // Basic page support
                 let mut url = url_tpl.replace("{{query}}", &urlencoding::encode(&query));
@@ -287,6 +289,7 @@ pub async fn search_scraper(
     }
 
     // Follow-up for magnet links if missing
+    let follow_up_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
     let mut follow_up_futures = vec![];
     for (idx, item) in items.iter().enumerate() {
         let magnet = item.get("magnet").and_then(|v| v.as_str()).unwrap_or("");
@@ -304,7 +307,9 @@ pub async fn search_scraper(
         {
             let client = client.clone();
             let url_path = url_path.to_string();
+            let follow_up_semaphore = follow_up_semaphore.clone();
             follow_up_futures.push(async move {
+                let _permit = follow_up_semaphore.acquire().await;
                 let item_url_tpl = item_conf.get("url").and_then(|v| v.as_str()).unwrap_or("");
                 let item_url = item_url_tpl.replace("{{item}}", &url_path);
 

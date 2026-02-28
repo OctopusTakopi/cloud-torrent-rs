@@ -42,9 +42,13 @@ pub async fn run(
         format!("Basic {}", b64)
     });
 
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_all();
+
     let state = Arc::new(AppState {
         engine,
         expected_auth,
+        sys: tokio::sync::Mutex::new(sys),
     });
 
     let broadcast_tx_cloned = broadcast_tx.clone();
