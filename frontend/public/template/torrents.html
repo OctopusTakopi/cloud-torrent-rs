@@ -29,8 +29,11 @@
     <div class="ui stackable grid">
       <div class="ten wide info column">
         <div class="name ui header">
-          <span ng-show="!ready(t.Name+'.zip')" title="{{ t.Name }}">
+          <span ng-show="!ready(t.Name+'.zip') && t.Loaded" title="{{ t.Name }}">
             {{ t.Name }}
+          </span>
+          <span ng-show="!t.Loaded" title="{{ t.Magnet }}" style="color: grey; word-break: break-all;">
+            {{ t.Magnet }}
           </span>
           <a ng-show="ready(t.Name+'.zip')" ng-href="{{ ready(t.Name+'.zip').url }}" title="{{ t.Name }}">
             {{ t.Name }}
@@ -77,7 +80,7 @@
             ng-click="t.$showFiles = !t.$showFiles">
             <i class="file icon"></i> Files
           </button>
-          <button ng-disabled="!t.Loaded || t.Started || $rootScope.apiing" class="ui compact button"
+          <button ng-if="t.Loaded" ng-disabled="!t.Loaded || t.Started || $rootScope.apiing" class="ui compact button"
             ng-class="{green: !t.Started}" ng-click="submitTorrent('start', t)">
             <i class="play icon"></i> Start
           </button>
@@ -96,11 +99,11 @@
         </div>
 
         <div ng-if="t.showSubBtns" class="ui mini buttons">
-          <button ng-disabled="$rootScope.apiing" class="ui compact yellow button"
+          <button ng-if="t.Loaded" ng-disabled="$rootScope.apiing" class="ui compact yellow button"
             title="Move the task to the last of wait queue" ng-click="submitTorrent('move2wait', t)">
             <i class="clock icon"></i> Queue
           </button>
-          <button ng-disabled="$rootScope.apiing" class="ui compact red button" title="Confirm Removing this task"
+          <button ng-if="t.Loaded" ng-disabled="$rootScope.apiing" class="ui compact red button" title="Confirm Removing this task"
             ng-click="submitTorrent('delete', t)">
             <i class="trash icon"></i> Remove
           </button>

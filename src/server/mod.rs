@@ -512,7 +512,22 @@ async fn api_magnet_post(
     State((state, _)): State<(Arc<AppState>, tokio::sync::broadcast::Sender<()>)>,
     body: String,
 ) -> impl IntoResponse {
-    let _ = state.engine.add_magnet(&body).await;
+    let lines: Vec<&str> = body
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let mut futures = Vec::new();
+    for line in lines {
+        let engine = state.engine.clone();
+        let line = line.to_string();
+        futures.push(tokio::spawn(async move {
+            let _ = engine.add_magnet(&line).await;
+        }));
+    }
+    for f in futures {
+        let _ = f.await;
+    }
     (StatusCode::OK, "OK").into_response()
 }
 

@@ -877,7 +877,13 @@ fn app() -> Html {
                                     <div class={classes!("ui", "torrent", "segment", if is_files_open { "open" } else { "" })}>
                                         <div class="ui stackable grid">
                                             <div class="ten wide info column">
-                                                <div class="name ui header">{ &t.name }</div>
+                                                <div class="name ui header">
+                                                    if !t.loaded {
+                                                        <span style="color: grey; word-break: break-all;">{ &t.magnet }</span>
+                                                    } else {
+                                                        { &t.name }
+                                                    }
+                                                </div>
                                                 <div class="speed">
                                                     <span class={classes!("ui", "label",
                                                         if t.upload_rate > 0.0 && t.upload_rate < 102400.0 { "yellow" }
@@ -921,17 +927,19 @@ fn app() -> Html {
                                                     <button class={classes!("ui", "button", if is_files_open { "teal" } else { "blue" })} onclick={let hash = hash.clone(); toggle_files.reform(move |_| hash.clone())}>
                                                         <i class="file icon"></i>{ " Files" }
                                                     </button>
-                                                    <button class={classes!("ui", "compact", "button", if !t.started { "green" } else { "" })} disabled={!t.loaded || t.started} onclick={on_start(hash.clone())}>
-                                                        <i class="play icon"></i>{ " Start" }
-                                                    </button>
-                                                    if t.started {
+                                                    if t.loaded {
+                                                        <button class={classes!("ui", "compact", "button", if !t.started { "green" } else { "" })} disabled={t.started} onclick={on_start(hash.clone())}>
+                                                            <i class="play icon"></i>{ " Start" }
+                                                        </button>
+                                                    }
+                                                    if t.started && t.loaded {
                                                         <button class="ui red compact button" onclick={on_stop(hash.clone())}><i class="stop icon"></i>{ " Stop" }</button>
                                                     }
                                                     if !t.loaded {
-                                                        <button class="ui red compact button" onclick={on_remove(hash.clone())}><i class="ban icon"></i>{ " Cancel" }</button>
+                                                        <button class="ui red compact button" onclick={on_remove(hash.clone())}><i class="trash icon"></i>{ " Remove" }</button>
                                                     }
                                                     if t.loaded && !t.started {
-                                                        <button class="ui orange compact button" onclick={on_remove(hash.clone())}><i class="question icon"></i>{ " Remove" }</button>
+                                                        <button class="ui orange compact button" onclick={on_remove(hash.clone())}><i class="trash icon"></i>{ " Remove" }</button>
                                                     }
                                                 </div>
                                                 if t.started {

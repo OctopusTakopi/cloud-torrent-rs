@@ -41,6 +41,7 @@ pub struct EngineState {
     pub torrent_started: HashMap<String, bool>,
     pub torrent_added_at: HashMap<String, i64>,
     pub torrent_magnets: HashMap<String, String>,
+    pub pending_magnets: HashMap<String, (String, i64, Option<tokio::sync::oneshot::Sender<()>>)>, // hash -> (magnet_url, added_at, tx)
 }
 
 #[derive(Clone)]
@@ -149,6 +150,7 @@ impl Engine {
                 torrent_started: HashMap::new(),
                 torrent_added_at: HashMap::new(),
                 torrent_magnets: HashMap::new(),
+                pending_magnets: HashMap::new(),
             })),
             changed_tx: tx,
             session: session.clone(),
@@ -296,6 +298,7 @@ impl Engine {
         let table = read_txn.open_table(TORRENTS_TABLE)?;
 
         let trackers = self.get_trackers(true).await;
+        let restore_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
 
         for result in table.iter()? {
             let (key, value) = result?;
@@ -335,13 +338,51 @@ impl Engine {
             };
 
             if let Some(hex_str) = magnet_or_url.strip_prefix("torrent_bytes:") {
-                if let Ok(bytes) = hex::decode(hex_str)
-                    && let Err(e) = self
-                        .session
-                        .add_torrent(AddTorrent::from_bytes(bytes), Some(opts))
-                        .await
-                {
-                    tracing::error!("Failed to restore torrent bytes {}: {}", info_hash, e);
+                if let Ok(bytes) = hex::decode(hex_str) {
+                    let engine_clone = self.clone();
+                    let info_hash = info_hash.to_string();
+                    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+                    {
+                        let mut state = self.state.write().await;
+                        state.pending_magnets.insert(
+                            info_hash.clone(),
+                            (record.magnet_or_url.clone(), record.added_at, Some(tx)),
+                        );
+                    }
+                    let restore_semaphore = restore_semaphore.clone();
+                    tokio::spawn(async move {
+                        let permit = restore_semaphore.acquire_owned().await.unwrap();
+                        let mut permit_opt = Some(permit);
+                        let sleep_fut = tokio::time::sleep(std::time::Duration::from_secs(60));
+                        tokio::pin!(sleep_fut);
+
+                        let add_fut = engine_clone
+                            .session
+                            .add_torrent(AddTorrent::from_bytes(bytes), Some(opts));
+                        tokio::pin!(add_fut);
+                        let mut rx = rx;
+
+                        let res = loop {
+                            tokio::select! {
+                                r = &mut add_fut => break r,
+                                _ = &mut sleep_fut, if permit_opt.is_some() => {
+                                    tracing::warn!("Restore of bytes {} exceeded 60s. Releasing permit.", info_hash);
+                                    permit_opt.take();
+                                },
+                                _ = &mut rx => {
+                                    tracing::info!("Restore {} was cancelled.", info_hash);
+                                    return;
+                                }
+                            }
+                        };
+                        {
+                            let mut state = engine_clone.state.write().await;
+                            state.pending_magnets.remove(&info_hash);
+                        }
+                        if let Err(e) = res {
+                            tracing::error!("Failed to restore torrent bytes {}: {}", info_hash, e);
+                        }
+                    });
                 }
                 continue;
             }
@@ -361,13 +402,51 @@ impl Engine {
                 }
             }
 
-            if let Err(e) = self
-                .session
-                .add_torrent(AddTorrent::from_url(&final_magnet), Some(opts))
-                .await
+            let engine_clone = self.clone();
+            let info_hash = info_hash.to_string();
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
             {
-                tracing::error!("Failed to restore torrent {}: {}", info_hash, e);
+                let mut state = self.state.write().await;
+                state.pending_magnets.insert(
+                    info_hash.clone(),
+                    (record.magnet_or_url.clone(), record.added_at, Some(tx)),
+                );
             }
+
+            let restore_semaphore = restore_semaphore.clone();
+            tokio::spawn(async move {
+                let permit = restore_semaphore.acquire_owned().await.unwrap();
+                let mut permit_opt = Some(permit);
+                let sleep_fut = tokio::time::sleep(std::time::Duration::from_secs(60));
+                tokio::pin!(sleep_fut);
+
+                let add_fut = engine_clone
+                    .session
+                    .add_torrent(AddTorrent::from_url(&final_magnet), Some(opts));
+                tokio::pin!(add_fut);
+                let mut rx = rx;
+
+                let res = loop {
+                    tokio::select! {
+                        r = &mut add_fut => break r,
+                        _ = &mut sleep_fut, if permit_opt.is_some() => {
+                            tracing::warn!("Restore of {} exceeded 60s. Releasing permit.", info_hash);
+                            permit_opt.take();
+                        },
+                        _ = &mut rx => {
+                            tracing::info!("Restore {} was cancelled.", info_hash);
+                            return;
+                        }
+                    }
+                };
+                {
+                    let mut state = engine_clone.state.write().await;
+                    state.pending_magnets.remove(&info_hash);
+                }
+                if let Err(e) = res {
+                    tracing::error!("Failed to restore torrent {}: {}", info_hash, e);
+                }
+            });
         }
         Ok(())
     }
@@ -520,12 +599,12 @@ impl Engine {
             if let Some(id) = target_id {
                 // Delete from DB
                 {
-                    let write_txn = self.db.begin_write()?;
-                    {
-                        let mut table = write_txn.open_table(TORRENTS_TABLE)?;
-                        table.remove(ih_hex)?;
+                    if let Ok(write_txn) = self.db.begin_write() {
+                        if let Ok(mut table) = write_txn.open_table(TORRENTS_TABLE) {
+                            let _ = table.remove(ih_hex);
+                        }
+                        let _ = write_txn.commit();
                     }
-                    write_txn.commit()?;
                 }
 
                 // Move file to trash_dir
@@ -534,7 +613,23 @@ impl Engine {
                     let _ = std::fs::rename(cache_file, trash_file);
                 }
 
-                self.session.delete(TorrentIdOrHash::Id(id), false).await?;
+                let _ = self.session.delete(TorrentIdOrHash::Id(id), false).await;
+            } else {
+                // Not in session, might be pending
+                let removed = {
+                    let mut state = self.state.write().await;
+                    if let Some((_, _, tx)) = state.pending_magnets.remove(ih_hex) {
+                        if let Some(tx) = tx {
+                            let _ = tx.send(());
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if removed {
+                    tracing::info!("Removed pending magnet {}", ih_hex);
+                }
             }
             let _ = self.changed_tx.try_send(());
             return Ok(());
@@ -548,7 +643,7 @@ impl Engine {
             ..Default::default()
         };
 
-        let mut final_magnet = magnet.to_string();
+        let final_magnet = magnet.to_string();
 
         if final_magnet.starts_with("http://") || final_magnet.starts_with("https://") {
             tracing::info!("Fetching HTTP torrent from {}", final_magnet);
@@ -558,59 +653,103 @@ impl Engine {
             return self.add_torrent_bytes(bytes).await;
         }
 
-        if magnet.starts_with("magnet:") {
-            let has_trackers = final_magnet.contains("&tr=");
-            if config.always_add_trackers || !has_trackers {
-                let trackers = self.get_trackers(false).await;
-                for tr in trackers {
-                    let encoded_tr = urlencoding::encode(&tr);
-                    if !final_magnet.contains(&encoded_tr.to_string()) {
-                        final_magnet.push_str("&tr=");
-                        final_magnet.push_str(&encoded_tr);
+        let engine_clone = self.clone();
+        let magnet_clone = magnet.to_string();
+
+        let info_hash_pending = if magnet_clone.starts_with("magnet:") {
+            if let Ok(m) = librqbit::Magnet::parse(&magnet_clone) {
+                m.as_id20().map(|h| h.as_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+        if let Some(hash) = &info_hash_pending {
+            let mut state = self.state.write().await;
+            state.pending_magnets.insert(
+                hash.clone(),
+                (magnet_clone.clone(), default_added_at(), Some(tx)),
+            );
+        }
+
+        tokio::spawn(async move {
+            let mut final_magnet = magnet_clone.clone();
+
+            if magnet_clone.starts_with("magnet:") {
+                let has_trackers = final_magnet.contains("&tr=");
+                if config.always_add_trackers || !has_trackers {
+                    let trackers = engine_clone.get_trackers(false).await;
+                    for tr in trackers {
+                        let encoded_tr = urlencoding::encode(&tr);
+                        if !final_magnet.contains(&encoded_tr.to_string()) {
+                            final_magnet.push_str("&tr=");
+                            final_magnet.push_str(&encoded_tr);
+                        }
                     }
                 }
             }
-        }
 
-        let res = self
-            .session
-            .add_torrent(AddTorrent::from_url(&final_magnet), Some(opts))
-            .await?;
-        let handle = res.into_handle().context("failed to get torrent handle")?;
-        let info_hash = handle.info_hash().as_string();
-
-        // Persist to redb
-        {
-            let added_at = if auto_start { default_added_at() } else { 0 };
-            let record = TorrentRecord {
-                magnet_or_url: magnet.to_string(),
-                started: auto_start,
-                added_at,
+            let res = tokio::select! {
+                r = engine_clone
+                    .session
+                    .add_torrent(AddTorrent::from_url(&final_magnet), Some(opts)) => r,
+                _ = rx => {
+                    tracing::info!("Magnet {} was cancelled.", final_magnet);
+                    return;
+                }
             };
-            let json = serde_json::to_string(&record)?;
-            let write_txn = self.db.begin_write()?;
-            {
-                let mut table = write_txn.open_table(TORRENTS_TABLE)?;
-                table.insert(info_hash.as_str(), json.as_str())?;
+
+            if let Some(hash) = &info_hash_pending {
+                let mut state = engine_clone.state.write().await;
+                state.pending_magnets.remove(hash);
             }
-            write_txn.commit()?;
-            let mut state = self.state.write().await;
-            state.torrent_started.insert(info_hash.clone(), auto_start);
-            state
-                .torrent_added_at
-                .insert(info_hash.clone(), record.added_at);
-            state
-                .torrent_magnets
-                .insert(info_hash.clone(), record.magnet_or_url.clone());
-        }
 
-        // Create .info file in cache_dir (Go style)
-        let (cache_file, _) = self.get_cache_paths(&info_hash).await;
-        if !cache_file.exists() {
-            let _ = std::fs::write(cache_file, magnet);
-        }
+            match res {
+                Ok(res) => {
+                    if let Some(handle) = res.into_handle() {
+                        let info_hash = handle.info_hash().as_string();
 
-        let _ = self.changed_tx.try_send(());
+                        // Persist to redb
+                        {
+                            let added_at = if auto_start { default_added_at() } else { 0 };
+                            let record = TorrentRecord {
+                                magnet_or_url: magnet_clone.clone(),
+                                started: auto_start,
+                                added_at,
+                            };
+                            if let Ok(json) = serde_json::to_string(&record)
+                                && let Ok(write_txn) = engine_clone.db.begin_write()
+                            {
+                                if let Ok(mut table) = write_txn.open_table(TORRENTS_TABLE) {
+                                    let _ = table.insert(info_hash.as_str(), json.as_str());
+                                }
+                                let _ = write_txn.commit();
+                            }
+                            let mut state = engine_clone.state.write().await;
+                            state.torrent_started.insert(info_hash.clone(), auto_start);
+                            state.torrent_added_at.insert(info_hash.clone(), added_at);
+                            state
+                                .torrent_magnets
+                                .insert(info_hash.clone(), magnet_clone.clone());
+                        }
+
+                        // Create .info file in cache_dir (Go style)
+                        let (cache_file, _) = engine_clone.get_cache_paths(&info_hash).await;
+                        if !cache_file.exists() {
+                            let _ = std::fs::write(cache_file, magnet_clone);
+                        }
+
+                        let _ = engine_clone.changed_tx.try_send(());
+                    }
+                }
+                Err(e) => tracing::error!("Error adding magnet {}: {}", final_magnet, e),
+            }
+        });
+
         Ok(())
     }
 
@@ -775,6 +914,40 @@ impl Engine {
             }
             torrents
         });
+
+        // Add pending magnets
+        for (hash, (magnet_url, added_ts, _)) in state_guard.pending_magnets.iter() {
+            let name = if let Ok(m) = librqbit::Magnet::parse(magnet_url) {
+                m.name.unwrap_or_else(|| hash.clone())
+            } else {
+                hash.clone()
+            };
+
+            torrents.push(Torrent {
+                info_hash: hash.clone(),
+                name,
+                magnet: magnet_url.clone(),
+                loaded: false,
+                downloaded: 0,
+                uploaded: 0,
+                size: 0,
+                percent: 0.0,
+                status: "Resolving".to_string(), // UI placeholder state
+                download_rate: 0.0,
+                upload_rate: 0.0,
+                is_queueing: false,
+                is_seeding: false,
+                started: true,
+                added_at: format_ago(*added_ts),
+                peers_connected: 0,
+                peers_total: 0,
+                peers_half_open: 0,
+                peers_pending: 0,
+                seed_ratio: 0.0,
+                added_at_ts: *added_ts,
+                files: vec![],
+            });
+        }
 
         torrents.sort_by_key(|t| std::cmp::Reverse(t.added_at_ts));
         torrents

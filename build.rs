@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-changed=frontend/dist");
     println!("cargo:rustc-env=RUSTC_VERSION={}", rustc_version_str());
 }
 
