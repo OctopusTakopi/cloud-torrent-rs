@@ -11,9 +11,10 @@ use axum::{
 use cloud_torrent_common::{GlobalState, Torrent};
 use futures::stream;
 use std::convert::Infallible;
-use std::io::{Read, Write};
 use std::sync::Arc;
 use sysinfo::Disks;
+use tokio::process::Command;
+use tokio_util::io::ReaderStream;
 use tower::ServiceExt;
 
 pub async fn sync_handler(
@@ -204,23 +205,35 @@ pub async fn serve_download(
     }
 
     if full_path.is_dir() {
-        let path_clone = full_path.to_path_buf();
         let zip_name = format!(
             "{}.zip",
             full_path.file_name().unwrap_or_default().to_string_lossy()
         );
 
-        let zip_data = tokio::task::spawn_blocking(move || {
-            let mut buf = Vec::new();
-            {
-                let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
-                let _ = add_dir_to_zip_sync(&mut zip, &path_clone, "");
-                let _ = zip.finish();
+        let child = Command::new("zip")
+            .arg("-0") // Store only (pack not compress)
+            .arg("-r") // Recursive
+            .arg("-") // Output to stdout
+            .arg(".") // Current directory
+            .current_dir(&full_path)
+            .stdout(std::process::Stdio::piped())
+            .spawn();
+
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to spawn zip command: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Error zipping directory")
+                    .into_response();
             }
-            buf
-        })
-        .await
-        .unwrap_or_default();
+        };
+
+        let stdout = child.stdout.take().unwrap();
+
+        // Ensure child process is cleaned up
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
 
         return Response::builder()
             .header(header::CONTENT_TYPE, "application/zip")
@@ -228,7 +241,7 @@ pub async fn serve_download(
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", zip_name),
             )
-            .body(axum::body::Body::from(zip_data))
+            .body(axum::body::Body::from_stream(ReaderStream::new(stdout)))
             .unwrap()
             .into_response();
     }
@@ -243,34 +256,6 @@ pub async fn serve_download(
             (StatusCode::INTERNAL_SERVER_ERROR, "Error serving file").into_response()
         }
     }
-}
-
-fn add_dir_to_zip_sync(
-    zip: &mut zip::ZipWriter<std::io::Cursor<&mut Vec<u8>>>,
-    path: &std::path::Path,
-    prefix: &str,
-) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        let entry_name = entry.file_name().to_string_lossy().to_string();
-        let zip_path = if prefix.is_empty() {
-            entry_name
-        } else {
-            format!("{}/{}", prefix, entry_name)
-        };
-        if entry_path.is_dir() {
-            zip.add_directory(&zip_path, zip::write::SimpleFileOptions::default())?;
-            add_dir_to_zip_sync(zip, &entry_path, &zip_path)?;
-        } else {
-            zip.start_file(&zip_path, zip::write::SimpleFileOptions::default())?;
-            let mut f = std::fs::File::open(entry_path)?;
-            let mut buffer = Vec::new();
-            f.read_to_end(&mut buffer)?;
-            zip.write_all(&buffer)?;
-        }
-    }
-    Ok(())
 }
 
 pub async fn delete_download(
