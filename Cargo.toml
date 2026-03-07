@@ -7,7 +7,7 @@ members = [
 
 [package]
 name = "cloud-torrent"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 
 [dependencies]
@@ -17,7 +17,7 @@ regex = "1"
 scraper = "0.25"
 rust-embed = "8.11"
 librqbit = "8"
-zip = "8.1"
+zip = "8.2"
 tokio-util = { version = "0.7", features = ["io"] }
 cloud-torrent-common = { path = "./common" }
 axum = { version = "0.8", features = ["macros", "ws"] }
@@ -40,7 +40,7 @@ mime_guess = "2.0"
 tokio-stream = "0.1"
 md5 = "0.8"
 hex = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 sysinfo = "0.38"
 urlencoding = "2.1"
 base64 = "0.22.1"
