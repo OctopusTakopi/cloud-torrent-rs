@@ -7,7 +7,7 @@ members = [
 
 [package]
 name = "cloud-torrent"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2024"
 
 [dependencies]
@@ -16,7 +16,7 @@ redb = "3"
 regex = "1"
 scraper = "0.25"
 rust-embed = "8.11"
-librqbit = "8"
+librqbit = { git = "https://github.com/ikatson/rqbit", branch = "main" }
 zip = "8.2"
 tokio-util = { version = "0.7", features = ["io"] }
 cloud-torrent-common = { path = "./common" }

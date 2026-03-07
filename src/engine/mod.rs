@@ -62,6 +62,17 @@ impl Engine {
             ..Default::default()
         };
 
+        let mut listen_opts = librqbit::ListenerOptions::default();
+        listen_opts.listen_addr.set_port(config.incoming_port as u16);
+        listen_opts.ipv4_only = config.disable_ipv6;
+        if config.disable_utp {
+            listen_opts.mode = librqbit::ListenerMode::TcpOnly;
+        } else {
+            listen_opts.mode = librqbit::ListenerMode::TcpAndUtp;
+        }
+        options.listen = Some(listen_opts);
+        options.ipv4_only = config.disable_ipv6;
+
         if let Some(down) = parse_rate(&config.download_rate) {
             use std::num::NonZeroU32;
             options.ratelimits.download_bps = NonZeroU32::new(down);
@@ -622,8 +633,8 @@ impl Engine {
 
     pub async fn get_metrics(&self) -> (u64, u64, u32) {
         let stats = self.session.stats_snapshot();
-        let written = stats.uploaded_bytes;
-        let read = stats.fetched_bytes;
+        let written = stats.counters.uploaded_bytes;
+        let read = stats.counters.fetched_bytes;
 
         let active = self.session.with_torrents(|torrents| {
             torrents
@@ -636,8 +647,13 @@ impl Engine {
 
     pub async fn get_dht_stats(&self) -> (usize, usize) {
         if let Some(dht) = self.session.get_dht() {
-            let stats = dht.stats();
-            (stats.routing_table_size, 0)
+            let mut v4 = 0;
+            let mut v6 = 0;
+            dht.with_routing_tables(|v4_rt, v6_rt| {
+                v4 = v4_rt.len();
+                v6 = v6_rt.len();
+            });
+            (v4, v6)
         } else {
             (0, 0)
         }
@@ -717,22 +733,22 @@ impl Engine {
                     peers_connected: stats
                         .live
                         .as_ref()
-                        .map(|l| l.snapshot.peer_stats.live as u32)
+                        .map(|l| l.snapshot.peer_stats.live)
                         .unwrap_or(0),
                     peers_total: stats
                         .live
                         .as_ref()
-                        .map(|l| l.snapshot.peer_stats.seen as u32)
+                        .map(|l| l.snapshot.peer_stats.seen)
                         .unwrap_or(0),
                     peers_half_open: stats
                         .live
                         .as_ref()
-                        .map(|l| l.snapshot.peer_stats.connecting as u32)
+                        .map(|l| l.snapshot.peer_stats.connecting)
                         .unwrap_or(0),
                     peers_pending: stats
                         .live
                         .as_ref()
-                        .map(|l| l.snapshot.peer_stats.queued as u32)
+                        .map(|l| l.snapshot.peer_stats.queued)
                         .unwrap_or(0),
                     seed_ratio: if downloaded > 0 {
                         stats.uploaded_bytes as f32 / downloaded as f32
