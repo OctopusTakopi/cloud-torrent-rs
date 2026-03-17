@@ -53,6 +53,7 @@ impl Engine {
             {
                 let _ = write_txn.open_table(TORRENTS_TABLE)?;
                 let _ = write_txn.open_table(TRACKERS_TABLE)?;
+                let _ = write_txn.open_table(RSS_TABLE)?;
             }
             write_txn.commit()?;
         }
@@ -63,7 +64,9 @@ impl Engine {
         };
 
         let mut listen_opts = librqbit::ListenerOptions::default();
-        listen_opts.listen_addr.set_port(config.incoming_port as u16);
+        listen_opts
+            .listen_addr
+            .set_port(config.incoming_port as u16);
         listen_opts.ipv4_only = config.disable_ipv6;
         if config.disable_utp {
             listen_opts.mode = librqbit::ListenerMode::TcpOnly;
@@ -119,6 +122,7 @@ impl Engine {
         loop {
             interval.tick().await;
             let config = self.get_config().await;
+            let mut available_download_budget = self.available_download_budget().await;
             let torrents = self.session.with_torrents(|torrents| {
                 torrents.map(|(id, h)| (id, h.clone())).collect::<Vec<_>>()
             });
@@ -130,6 +134,8 @@ impl Engine {
             for (id, h) in torrents {
                 let stats = h.stats();
                 let info_hash = h.info_hash().as_string();
+                let remaining_bytes =
+                    remaining_download_bytes(stats.total_bytes, stats.progress_bytes);
                 let is_started = self
                     .state
                     .read()
@@ -171,6 +177,21 @@ impl Engine {
                 }
 
                 if !matches!(stats.state, TorrentStatsState::Paused) {
+                    if let Some(remaining_bytes) = remaining_bytes {
+                        if remaining_bytes > available_download_budget {
+                            tracing::warn!(
+                                "Pausing torrent {} because it needs {} more bytes and only {} are available.",
+                                id,
+                                remaining_bytes,
+                                available_download_budget
+                            );
+                            let _ = self.session.pause(&h).await;
+                            continue;
+                        }
+                        available_download_budget =
+                            available_download_budget.saturating_sub(remaining_bytes);
+                    }
+
                     active_count += 1;
                     if !stats.finished {
                         downloading_count += 1;
@@ -207,7 +228,7 @@ impl Engine {
                         continue;
                     }
                 } else if !stats.finished && is_started {
-                    queue.push(h);
+                    queue.push((h, remaining_bytes));
                 }
             }
 
@@ -215,7 +236,7 @@ impl Engine {
             if (downloading_count < config.max_concurrent_task || config.max_concurrent_task == 0)
                 && (active_count < config.max_active_torrents || config.max_active_torrents == 0)
             {
-                for h in queue {
+                for (h, remaining_bytes) in queue {
                     if config.max_concurrent_task > 0
                         && downloading_count >= config.max_concurrent_task
                     {
@@ -224,6 +245,19 @@ impl Engine {
                     if config.max_active_torrents > 0 && active_count >= config.max_active_torrents
                     {
                         break;
+                    }
+                    if let Some(remaining_bytes) = remaining_bytes {
+                        if remaining_bytes > available_download_budget {
+                            tracing::warn!(
+                                "Skipping start for torrent {} because it needs {} more bytes and only {} are available.",
+                                h.id(),
+                                remaining_bytes,
+                                available_download_budget
+                            );
+                            continue;
+                        }
+                        available_download_budget =
+                            available_download_budget.saturating_sub(remaining_bytes);
                     }
                     tracing::info!("Starting queued torrent {}.", h.id());
                     let _ = self.session.unpause(&h).await;
@@ -387,7 +421,7 @@ impl Engine {
     pub async fn add_torrent_bytes(&self, bytes: Vec<u8>) -> Result<()> {
         let auto_start = self.state.read().await.config.auto_start;
         let opts = AddTorrentOptions {
-            paused: !auto_start,
+            paused: true,
             overwrite: true,
             ..Default::default()
         };
@@ -398,6 +432,23 @@ impl Engine {
             .await?;
         let handle = res.into_handle().context("failed to get torrent handle")?;
         let info_hash = handle.info_hash().as_string();
+
+        if auto_start {
+            let stats = handle.stats();
+            if let Err(err) = self
+                .ensure_disk_space_for_download(
+                    stats.total_bytes as u64,
+                    stats.progress_bytes as u64,
+                )
+                .await
+            {
+                let _ = self
+                    .session
+                    .delete(TorrentIdOrHash::Id(handle.id()), false)
+                    .await;
+                return Err(err);
+            }
+        }
 
         let added_at = if auto_start { default_added_at() } else { 0 };
         let record = TorrentRecord {
@@ -427,6 +478,10 @@ impl Engine {
             let _ = std::fs::write(cache_file, bytes);
         }
 
+        if auto_start {
+            let _ = self.session.unpause(&handle).await;
+        }
+
         let _ = self.changed_tx.try_send(());
         Ok(())
     }
@@ -444,6 +499,9 @@ impl Engine {
                 None
             });
             if let Some(h) = handle {
+                let stats = h.stats();
+                self.ensure_disk_space_for_download(stats.total_bytes, stats.progress_bytes)
+                    .await?;
                 let _ = self.session.unpause(&h).await;
                 let now = default_added_at();
                 {
@@ -524,7 +582,7 @@ impl Engine {
         let config = self.get_config().await;
         let auto_start = config.auto_start;
         let opts = AddTorrentOptions {
-            paused: !auto_start,
+            paused: true,
             overwrite: true,
             ..Default::default()
         };
@@ -550,9 +608,11 @@ impl Engine {
             None
         };
 
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<()>>();
+        let mut cancel_rx = None;
 
         if let Some(hash) = &info_hash_pending {
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
             let mut state = self.state.write().await;
             state.pending_magnets.insert(
                 hash.clone(),
@@ -562,6 +622,8 @@ impl Engine {
                     cancel_tx: Some(tx),
                 },
             );
+            cancel_rx = Some(rx);
+            let _ = self.changed_tx.try_send(());
         }
 
         tokio::spawn(async move {
@@ -582,18 +644,45 @@ impl Engine {
                 }
             }
 
-            tokio::select! {
-                res = engine_clone.session.add_torrent(AddTorrent::from_url(&final_magnet), Some(opts)) => {
-                    if let Ok(res) = res {
+            let add_result = async {
+                match engine_clone
+                    .session
+                    .add_torrent(AddTorrent::from_url(&final_magnet), Some(opts))
+                    .await
+                {
+                    Ok(res) => {
                         if let Some(handle) = res.into_handle() {
                             let info_hash = handle.info_hash().as_string();
                             let added_at = if auto_start { default_added_at() } else { 0 };
+
+                            if auto_start {
+                                let stats = handle.stats();
+                                if let Err(err) = engine_clone
+                                    .ensure_disk_space_for_download(
+                                        stats.total_bytes,
+                                        stats.progress_bytes,
+                                    )
+                                    .await
+                                {
+                                    let _ = engine_clone
+                                        .session
+                                        .delete(TorrentIdOrHash::Id(handle.id()), false)
+                                        .await;
+                                    tracing::warn!(
+                                        "Rejecting magnet {} because of insufficient disk space: {}",
+                                        magnet_clone,
+                                        err
+                                    );
+                                    return Err(err);
+                                }
+                            }
+
                             let record = TorrentRecord {
                                 magnet_or_url: magnet_clone.clone(),
                                 started: auto_start,
                                 added_at,
                             };
-                            let _ = engine_clone.storage.save_torrent(&info_hash, &record);
+                            engine_clone.storage.save_torrent(&info_hash, &record)?;
 
                             {
                                 let mut state = engine_clone.state.write().await;
@@ -609,26 +698,48 @@ impl Engine {
 
                             let (cache_file, _) = engine_clone.get_cache_paths(&info_hash).await;
                             if !cache_file.exists() {
-                                let _ = tokio::fs::write(cache_file, magnet_clone).await;
+                                tokio::fs::write(cache_file, &magnet_clone).await?;
+                            }
+
+                            if auto_start {
+                                let _ = engine_clone.session.unpause(&handle).await;
                             }
                             let _ = engine_clone.changed_tx.try_send(());
+                            Ok(())
+                        } else {
+                            Err(anyhow::anyhow!("failed to get torrent handle"))
                         }
-                    } else if let Err(e) = res {
-                        tracing::error!("Error adding magnet {}: {}", final_magnet, e);
                     }
-                },
-                _ = rx => {
-                    tracing::info!("Magnet {} was cancelled.", final_magnet);
+                    Err(e) => {
+                        tracing::error!("Error adding magnet {}: {}", final_magnet, e);
+                        Err(e)
+                    }
                 }
-            }
+            };
+            let result = if let Some(rx) = cancel_rx {
+                tokio::select! {
+                    res = add_result => res,
+                    _ = rx => {
+                        tracing::info!("Magnet {} was cancelled.", final_magnet);
+                        Err(anyhow::anyhow!("magnet add was cancelled"))
+                    }
+                }
+            } else {
+                add_result.await
+            };
 
             if let Some(hash) = &info_hash_pending {
                 let mut state = engine_clone.state.write().await;
                 state.pending_magnets.remove(hash);
+                let _ = engine_clone.changed_tx.try_send(());
             }
+
+            let _ = result_tx.send(result);
         });
 
-        Ok(())
+        result_rx
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("magnet add task terminated unexpectedly")))
     }
 
     pub async fn get_metrics(&self) -> (u64, u64, u32) {
@@ -806,5 +917,50 @@ impl Engine {
 
     pub async fn get_trackers(&self, force_refresh: bool) -> Vec<String> {
         crate::engine::trackers::get_all_trackers(self, force_refresh).await
+    }
+
+    async fn available_download_budget(&self) -> u64 {
+        let config = self.get_config().await;
+        available_space_for_path(Path::new(&config.download_directory))
+            .saturating_sub(DISK_SPACE_RESERVE_BYTES)
+    }
+
+    async fn active_download_reservation(&self) -> u64 {
+        self.session.with_torrents(|torrents| {
+            torrents
+                .filter_map(|(_, h)| {
+                    let stats = h.stats();
+                    if matches!(stats.state, TorrentStatsState::Paused) {
+                        None
+                    } else {
+                        remaining_download_bytes(stats.total_bytes, stats.progress_bytes)
+                    }
+                })
+                .sum()
+        })
+    }
+
+    async fn available_start_budget(&self) -> u64 {
+        self.available_download_budget()
+            .await
+            .saturating_sub(self.active_download_reservation().await)
+    }
+
+    async fn ensure_disk_space_for_download(
+        &self,
+        total_bytes: u64,
+        progress_bytes: u64,
+    ) -> Result<()> {
+        if let Some(required_bytes) = remaining_download_bytes(total_bytes, progress_bytes) {
+            let free_bytes = self.available_start_budget().await;
+            if required_bytes > free_bytes {
+                return Err(EngineError::InsufficientStorage(format_storage_error(
+                    required_bytes,
+                    free_bytes,
+                ))
+                .into());
+            }
+        }
+        Ok(())
     }
 }

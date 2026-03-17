@@ -6,6 +6,7 @@ use tokio::sync::oneshot;
 
 pub const TORRENTS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("torrents");
 pub const TRACKERS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("trackers");
+pub const RSS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("rss");
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TorrentRecord {
@@ -26,6 +27,36 @@ pub fn default_added_at() -> i64 {
 pub struct CachedTrackers {
     pub list: Vec<String>,
     pub updated_at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PersistedRssFeed {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub items: Vec<cloud_torrent_common::RssItem>,
+    #[serde(default)]
+    pub last_updated: i64,
+    #[serde(default)]
+    pub last_error: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PersistedRssState {
+    #[serde(default)]
+    pub initialized: bool,
+    #[serde(default)]
+    pub latest_guid: String,
+    #[serde(default)]
+    pub last_updated: i64,
+    #[serde(default)]
+    pub last_error: String,
+    #[serde(default)]
+    pub seen_items: HashMap<String, i64>,
+    #[serde(default)]
+    pub loaded_items: HashMap<String, i64>,
+    #[serde(default)]
+    pub feeds: HashMap<String, PersistedRssFeed>,
 }
 
 #[derive(Default, Debug)]
@@ -59,6 +90,8 @@ pub enum EngineError {
     Io(#[from] std::io::Error),
     #[error("Torrent error: {0}")]
     Torrent(String),
+    #[error("Insufficient storage: {0}")]
+    InsufficientStorage(String),
     #[error("Internal error: {0}")]
     Internal(String),
 }

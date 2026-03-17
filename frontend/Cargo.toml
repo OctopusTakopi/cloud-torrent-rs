@@ -1,6 +1,6 @@
 [package]
 name = "cloud-torrent-frontend"
-version = "1.0.4"
+version = "1.0.7"
 edition = "2024"
 
 [dependencies]

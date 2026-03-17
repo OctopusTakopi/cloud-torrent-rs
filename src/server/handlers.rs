@@ -1,6 +1,9 @@
+use crate::engine::types::EngineError;
 use crate::server::scraper::search_scraper;
 use crate::server::state::AppState;
-use crate::server::types::{AppError, AppResult, FileNode, MagnetQuery, SearchQuery};
+use crate::server::types::{
+    AppError, AppResult, FileNode, MagnetQuery, RssLoadRequest, RssQuery, SearchQuery,
+};
 use axum::{
     Json,
     body::Bytes,
@@ -47,9 +50,11 @@ pub async fn sync_handler(
 
 pub async fn get_global_state(state: &AppState) -> GlobalState {
     let stats_val = get_system_stats(state).await;
+    let rss_snapshot = state.rss.snapshot().await;
     GlobalState {
         use_queue: false,
-        latest_rss_guid: "".to_string(),
+        latest_rss_guid: rss_snapshot.latest_guid.clone(),
+        rss_last_error: rss_snapshot.last_error,
         torrents: state.engine.get_torrents().await,
         users: std::collections::HashMap::new(),
         stats: serde_json::from_value(stats_val).unwrap(),
@@ -135,12 +140,33 @@ pub async fn get_system_stats(state: &AppState) -> serde_json::Value {
     })
 }
 
-pub async fn api_rss(State(state): State<Arc<AppState>>) -> Json<Vec<serde_json::Value>> {
-    let config = state.engine.get_config().await;
-    if config.rss_url.is_empty() {
-        return Json(vec![]);
-    }
-    Json(vec![])
+pub async fn api_rss(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<RssQuery>,
+) -> Json<cloud_torrent_common::RssSnapshot> {
+    let snapshot = if params.refresh {
+        state.rss.refresh(&state.engine).await.snapshot
+    } else {
+        state.rss.snapshot().await
+    };
+    Json(snapshot)
+}
+
+pub async fn api_rss_load(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RssLoadRequest>,
+) -> AppResult<Json<cloud_torrent_common::RssSnapshot>> {
+    state
+        .engine
+        .add_magnet(&req.load_url)
+        .await
+        .map_err(map_engine_error)?;
+    let snapshot = state
+        .rss
+        .mark_item_loaded(&state.engine, &req.item_id)
+        .await
+        .map_err(map_engine_error)?;
+    Ok(Json(snapshot))
 }
 
 pub async fn api_files(State(state): State<Arc<AppState>>) -> AppResult<Json<FileNode>> {
@@ -287,40 +313,43 @@ pub async fn api_magnet_get(
         .engine
         .add_magnet(&params.m)
         .await
-        .map_err(AppError::Internal)?;
+        .map_err(map_engine_error)?;
     Ok((StatusCode::OK, "Magnet added"))
 }
 
 pub async fn api_magnet_post(
     State(state): State<Arc<AppState>>,
     body: String,
-) -> impl IntoResponse {
+) -> AppResult<impl IntoResponse> {
     let lines: Vec<&str> = body
         .lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
         .collect();
 
-    let mut futures = Vec::new();
+    let mut errors = Vec::new();
     for line in lines {
-        let engine = state.engine.clone();
-        let line = line.to_string();
-        futures.push(tokio::spawn(async move {
-            let _ = engine.add_magnet(&line).await;
-        }));
+        if let Err(err) = state.engine.add_magnet(line).await {
+            errors.push(err);
+        }
     }
-    for f in futures {
-        let _ = f.await;
+    if let Some(err) = errors.into_iter().next() {
+        Err(map_engine_error(err))
+    } else {
+        Ok((StatusCode::OK, "OK"))
     }
-    (StatusCode::OK, "OK")
 }
 
 pub async fn api_torrent_post(
     State(state): State<Arc<AppState>>,
     body: Bytes,
-) -> impl IntoResponse {
-    let _ = state.engine.add_torrent_bytes(body.to_vec()).await;
-    (StatusCode::OK, "OK")
+) -> AppResult<impl IntoResponse> {
+    state
+        .engine
+        .add_torrent_bytes(body.to_vec())
+        .await
+        .map_err(map_engine_error)?;
+    Ok((StatusCode::OK, "OK"))
 }
 
 pub async fn api_configure_get(
@@ -337,6 +366,8 @@ pub async fn api_configure_post(
         tracing::error!("Failed to update config: {}", e);
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    let _ = state.rss.refresh(&state.engine).await;
     StatusCode::OK
 }
 
@@ -375,6 +406,18 @@ pub async fn api_search_providers(
         .collect();
 
     Json(providers)
+}
+
+fn map_engine_error(err: anyhow::Error) -> AppError {
+    if let Some(engine_err) = err.downcast_ref::<EngineError>() {
+        return match engine_err {
+            EngineError::InsufficientStorage(message) => {
+                AppError::InsufficientStorage(message.clone())
+            }
+            _ => AppError::Internal(err),
+        };
+    }
+    AppError::Internal(err)
 }
 
 pub async fn static_handler(

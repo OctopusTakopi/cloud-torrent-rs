@@ -1,5 +1,6 @@
 use crate::engine::types::{
-    CachedTrackers, EngineResult, TORRENTS_TABLE, TRACKERS_TABLE, TorrentRecord,
+    CachedTrackers, EngineResult, PersistedRssState, RSS_TABLE, TORRENTS_TABLE, TRACKERS_TABLE,
+    TorrentRecord,
 };
 use redb::{Database, ReadableDatabase, ReadableTable};
 use std::sync::Arc;
@@ -106,6 +107,45 @@ impl Storage {
             .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?
         {
             let cached: CachedTrackers = serde_json::from_str(value.value())?;
+            Ok(Some(cached))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn save_rss_state(&self, rss_state: &PersistedRssState) -> EngineResult<()> {
+        let json = serde_json::to_string(rss_state)?;
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+        {
+            let mut table = write_txn
+                .open_table(RSS_TABLE)
+                .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+            table
+                .insert("state", json.as_str())
+                .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+        }
+        write_txn
+            .commit()
+            .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn load_rss_state(&self) -> EngineResult<Option<PersistedRssState>> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+        let table = read_txn
+            .open_table(RSS_TABLE)
+            .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?;
+        if let Some(value) = table
+            .get("state")
+            .map_err(|e| crate::engine::types::EngineError::Database(e.to_string()))?
+        {
+            let cached: PersistedRssState = serde_json::from_str(value.value())?;
             Ok(Some(cached))
         } else {
             Ok(None)

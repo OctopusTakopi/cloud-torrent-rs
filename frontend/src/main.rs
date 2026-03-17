@@ -1,6 +1,6 @@
-use cloud_torrent_common::{Config, GlobalState};
+use cloud_torrent_common::{Config, GlobalState, RssSnapshot};
 use futures::StreamExt;
-use gloo_net::http::Request;
+use gloo_net::http::{Request, Response};
 use gloo_net::websocket::{Message, futures::WebSocket};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -90,15 +90,7 @@ fn config_panel(props: &ConfigPanelProps) -> Html {
         let config = config.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                if let Ok(c) = async {
-                    if let Ok(resp) = Request::get("/api/configure").send().await {
-                        resp.json::<Config>().await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Request failed".into()))
-                    }
-                }
-                .await
-                {
+                if let Ok(c) = fetch_config_request().await {
                     config.set(Some(c));
                 }
             });
@@ -118,11 +110,7 @@ fn config_panel(props: &ConfigPanelProps) -> Html {
                 let on_close = on_close.clone();
                 spawn_local(async move {
                     saving.set(true);
-                    let _ = Request::post("/api/configure")
-                        .json(&c)
-                        .unwrap()
-                        .send()
-                        .await;
+                    let _ = save_config_request(&c).await;
                     saving.set(false);
                     on_close.emit(());
                 });
@@ -372,6 +360,119 @@ fn format_bytes(bytes: u64) -> String {
     format!("{:.2} {}", bytes as f64 / k.powi(i as i32), sizes[i])
 }
 
+fn format_timestamp(timestamp: i64) -> String {
+    if timestamp <= 0 {
+        return "".to_string();
+    }
+
+    chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_default()
+}
+
+async fn parse_error_response(resp: Response) -> String {
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if let Ok(json) = serde_json::from_str::<Value>(&text)
+        && let Some(message) = json.get("error").and_then(|value| value.as_str())
+    {
+        return message.to_string();
+    }
+    if text.trim().is_empty() {
+        format!("Request failed with HTTP {}", status)
+    } else {
+        text
+    }
+}
+
+async fn post_text_request(url: &str, body: String) -> Result<(), String> {
+    let resp = Request::post(url)
+        .body(body)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        Ok(())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
+async fn post_bytes_request(url: &str, body: Vec<u8>) -> Result<(), String> {
+    let resp = Request::post(url)
+        .body(body)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        Ok(())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
+async fn fetch_rss_snapshot(refresh: bool) -> Result<RssSnapshot, String> {
+    let url = if refresh { "/rss?refresh=true" } else { "/rss" };
+    let resp = Request::get(url)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        resp.json::<RssSnapshot>()
+            .await
+            .map_err(|err| err.to_string())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
+async fn post_rss_load_request(item_id: String, load_url: String) -> Result<RssSnapshot, String> {
+    let resp = Request::post("/api/rss/load")
+        .json(&serde_json::json!({
+            "item_id": item_id,
+            "load_url": load_url,
+        }))
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        resp.json::<RssSnapshot>()
+            .await
+            .map_err(|err| err.to_string())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
+async fn fetch_config_request() -> Result<Config, String> {
+    let resp = Request::get("/api/configure")
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        resp.json::<Config>().await.map_err(|err| err.to_string())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
+async fn save_config_request(config: &Config) -> Result<(), String> {
+    let resp = Request::post("/api/configure")
+        .json(config)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        Ok(())
+    } else {
+        Err(parse_error_response(resp).await)
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 enum OmniMode {
     Search,
@@ -390,16 +491,23 @@ fn app() -> Html {
     let omni_input = use_state(String::new);
     let omni_mode = use_state(|| OmniMode::Search);
     let files = use_state(|| None::<Value>);
-    let rss_items = use_state(Vec::<Value>::new);
+    let rss_state = use_state(|| None::<RssSnapshot>);
+    let rss_config = use_state(|| None::<Config>);
+    let rss_input = use_state(String::new);
 
     let show_config = use_state(|| false);
     let show_omni_editor = use_state(|| false);
     let show_rss = use_state(|| false);
     let show_engine_status = use_state(|| false);
+    let rss_loading = use_state(|| false);
+    let rss_config_loading = use_state(|| false);
+    let rss_config_saving = use_state(|| false);
     let searching = use_state(|| false);
     let search_results = use_state(Vec::<serde_json::Value>::new);
     let providers = use_state(HashMap::<String, Value>::new);
     let selected_provider = use_state(|| "thepiratebay".to_string());
+    let ui_error = use_state(|| None::<String>);
+    let last_rss_error = use_state(String::new);
 
     {
         let state = state.clone();
@@ -457,6 +565,24 @@ fn app() -> Html {
         });
     }
 
+    {
+        let ui_error = ui_error.clone();
+        let last_rss_error = last_rss_error.clone();
+        let rss_error = (*state)
+            .as_ref()
+            .map(|value| value.rss_last_error.clone())
+            .unwrap_or_default();
+        use_effect_with(rss_error, move |rss_error| {
+            if rss_error.is_empty() {
+                last_rss_error.set(String::new());
+            } else if *last_rss_error != *rss_error {
+                ui_error.set(Some(format!("RSS subscription error: {}", rss_error)));
+                last_rss_error.set(rss_error.clone());
+            }
+            || ()
+        });
+    }
+
     let refresh_files = {
         let files = files.clone();
         Callback::from(move |_| {
@@ -478,24 +604,81 @@ fn app() -> Html {
     };
 
     let fetch_rss = {
-        let rss_items = rss_items.clone();
-        Callback::from(move |_| {
-            let rss_items = rss_items.clone();
+        let rss_loading = rss_loading.clone();
+        let rss_state = rss_state.clone();
+        let ui_error = ui_error.clone();
+        let last_rss_error = last_rss_error.clone();
+        Callback::from(move |refresh: bool| {
+            let rss_loading = rss_loading.clone();
+            let rss_state = rss_state.clone();
+            let ui_error = ui_error.clone();
+            let last_rss_error = last_rss_error.clone();
             spawn_local(async move {
-                if let Ok(json) = async {
-                    if let Ok(resp) = Request::get("/rss").send().await {
-                        resp.json::<Vec<Value>>().await
-                    } else {
-                        Err(gloo_net::Error::GlooError("Request failed".into()))
+                rss_loading.set(true);
+                match fetch_rss_snapshot(refresh).await {
+                    Ok(json) => {
+                        if !json.last_error.is_empty() {
+                            last_rss_error.set(json.last_error.clone());
+                            ui_error
+                                .set(Some(format!("RSS subscription error: {}", json.last_error)));
+                        } else {
+                            last_rss_error.set(String::new());
+                        }
+                        rss_state.set(Some(json));
+                    }
+                    Err(err) => {
+                        ui_error.set(Some(format!("Failed to refresh RSS feeds: {}", err)));
                     }
                 }
-                .await
-                {
-                    rss_items.set(json);
-                }
+                rss_loading.set(false);
             });
         })
     };
+
+    {
+        let fetch_rss = fetch_rss.clone();
+        let show_rss = show_rss.clone();
+        let rss_trigger = (*state)
+            .as_ref()
+            .map(|value| format!("{}|{}", value.latest_rss_guid, value.rss_last_error))
+            .unwrap_or_default();
+        use_effect_with((rss_trigger, *show_rss), move |(_, show_rss)| {
+            if *show_rss {
+                fetch_rss.emit(false);
+            }
+            || ()
+        });
+    }
+
+    {
+        let show_rss = show_rss.clone();
+        let rss_config = rss_config.clone();
+        let rss_input = rss_input.clone();
+        let rss_config_loading = rss_config_loading.clone();
+        let ui_error = ui_error.clone();
+        use_effect_with(*show_rss, move |show_rss| {
+            if *show_rss {
+                let rss_config = rss_config.clone();
+                let rss_input = rss_input.clone();
+                let rss_config_loading = rss_config_loading.clone();
+                let ui_error = ui_error.clone();
+                spawn_local(async move {
+                    rss_config_loading.set(true);
+                    match fetch_config_request().await {
+                        Ok(config) => {
+                            rss_input.set(config.rss_url.clone());
+                            rss_config.set(Some(config));
+                        }
+                        Err(err) => {
+                            ui_error.set(Some(format!("Failed to load RSS settings: {}", err)))
+                        }
+                    }
+                    rss_config_loading.set(false);
+                });
+            }
+            || ()
+        });
+    }
 
     let on_delete_file = {
         let refresh_files = refresh_files.clone();
@@ -504,6 +687,40 @@ fn app() -> Html {
             spawn_local(async move {
                 let _ = Request::delete(&format!("/download/{}", path)).send().await;
                 refresh_files.emit(());
+            });
+        })
+    };
+
+    let save_rss_subscriptions = {
+        let rss_config = rss_config.clone();
+        let rss_input = rss_input.clone();
+        let rss_config_saving = rss_config_saving.clone();
+        let ui_error = ui_error.clone();
+        let fetch_rss = fetch_rss.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            let Some(mut config) = (*rss_config).clone() else {
+                ui_error.set(Some("RSS settings are still loading.".to_string()));
+                return;
+            };
+            let rss_value = (*rss_input).clone();
+            let rss_config = rss_config.clone();
+            let rss_config_saving = rss_config_saving.clone();
+            let ui_error = ui_error.clone();
+            let fetch_rss = fetch_rss.clone();
+            spawn_local(async move {
+                rss_config_saving.set(true);
+                config.rss_url = rss_value;
+                match save_config_request(&config).await {
+                    Ok(()) => {
+                        rss_config.set(Some(config));
+                        fetch_rss.emit(true);
+                    }
+                    Err(err) => {
+                        ui_error.set(Some(format!("Failed to save RSS subscriptions: {}", err)));
+                    }
+                }
+                rss_config_saving.set(false);
             });
         })
     };
@@ -529,6 +746,7 @@ fn app() -> Html {
         let searching = searching.clone();
         let search_results = search_results.clone();
         let selected_provider = selected_provider.clone();
+        let ui_error = ui_error.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
             let val = (*omni_input).clone();
@@ -540,11 +758,14 @@ fn app() -> Html {
             let searching = searching.clone();
             let search_results = search_results.clone();
             let provider = (*selected_provider).clone();
+            let ui_error = ui_error.clone();
             spawn_local(async move {
                 match omni_mode {
                     OmniMode::Magnet | OmniMode::Torrent => {
-                        let _ = Request::post("/api/magnet").body(val).unwrap().send().await;
-                        omni_input.set(String::new());
+                        match post_text_request("/api/magnet", val).await {
+                            Ok(()) => omni_input.set(String::new()),
+                            Err(err) => ui_error.set(Some(err)),
+                        }
                     }
                     OmniMode::Search => {
                         searching.set(true);
@@ -574,15 +795,19 @@ fn app() -> Html {
 
     let on_load_submit = {
         let omni_input = omni_input.clone();
+        let ui_error = ui_error.clone();
         Callback::from(move |_| {
             let val = (*omni_input).clone();
             if val.is_empty() {
                 return;
             }
             let omni_input = omni_input.clone();
+            let ui_error = ui_error.clone();
             spawn_local(async move {
-                let _ = Request::post("/api/magnet").body(val).unwrap().send().await;
-                omni_input.set(String::new());
+                match post_text_request("/api/magnet", val).await {
+                    Ok(()) => omni_input.set(String::new()),
+                    Err(err) => ui_error.set(Some(err)),
+                }
             });
         })
     };
@@ -623,23 +848,25 @@ fn app() -> Html {
     };
 
     let on_drop = {
+        let ui_error = ui_error.clone();
         Callback::from(move |e: DragEvent| {
             e.prevent_default();
+            let ui_error = ui_error.clone();
             if let Some(files) = e.data_transfer().and_then(|dt| dt.files()) {
                 for i in 0..files.length() {
                     if let Some(file) = files.get(i) {
                         let reader = FileReader::new().unwrap();
                         let reader_c = reader.clone();
+                        let ui_error = ui_error.clone();
                         let onload = Closure::wrap(Box::new(move |_e: JsEvent| {
                             let result = reader_c.result().unwrap();
                             let array = js_sys::Uint8Array::new(&result);
                             let bytes = array.to_vec();
+                            let ui_error = ui_error.clone();
                             spawn_local(async move {
-                                let _ = Request::post("/api/torrent")
-                                    .body(bytes)
-                                    .unwrap()
-                                    .send()
-                                    .await;
+                                if let Err(err) = post_bytes_request("/api/torrent", bytes).await {
+                                    ui_error.set(Some(err));
+                                }
                             });
                         })
                             as Box<dyn FnMut(JsEvent)>);
@@ -653,14 +880,15 @@ fn app() -> Html {
     };
 
     let on_start = |hash: String| {
+        let ui_error = ui_error.clone();
         Callback::from(move |_| {
             let hash = hash.clone();
+            let ui_error = ui_error.clone();
             spawn_local(async move {
-                let _ = Request::post("/api/magnet")
-                    .body(format!("start:{}", hash))
-                    .unwrap()
-                    .send()
-                    .await;
+                if let Err(err) = post_text_request("/api/magnet", format!("start:{}", hash)).await
+                {
+                    ui_error.set(Some(err));
+                }
             });
         })
     };
@@ -729,6 +957,16 @@ fn app() -> Html {
                 </div>
             }
 
+            if let Some(error) = &*ui_error {
+                <div style="position: fixed; top: 16px; right: 16px; z-index: 2000; max-width: min(520px, calc(100vw - 32px));">
+                    <div class="ui negative message">
+                        <i class="close icon" style="cursor: pointer;" onclick={let ui_error = ui_error.clone(); move |_| ui_error.set(None)}></i>
+                        <div class="header">{ "Action Failed" }</div>
+                        <p style="white-space: pre-wrap; margin-bottom: 0;">{ error.clone() }</p>
+                    </div>
+                </div>
+            }
+
             <div class="title">
                 <h2>
                     <a href="https://github.com/OctopusTakopi/cloud-torrent-rs" target="_blank">
@@ -736,7 +974,7 @@ fn app() -> Html {
                     </a>
                 </h2>
                 <div class="status">
-                    <i class={classes!("ui", "circular", "rss", "square", "icon", if *show_rss { "green" } else { "" })} onclick={let show_rss = show_rss.clone(); let fetch_rss = fetch_rss.clone(); move |_| { let ns = !*show_rss; show_rss.set(ns); if ns { fetch_rss.emit(()); } }} title="RSS List"></i>
+                    <i class={classes!("ui", "circular", "rss", "square", "icon", if *show_rss { "green" } else { "" })} onclick={let show_rss = show_rss.clone(); let fetch_rss = fetch_rss.clone(); move |_| { let ns = !*show_rss; show_rss.set(ns); if ns { fetch_rss.emit(true); } }} title="RSS List"></i>
                     <i class={classes!("ui", "circular", "server", "icon", if *show_config { "green" } else { "" })} onclick={let show_config = show_config.clone(); move |_| show_config.set(!*show_config)} title="Edit Config"></i>
                     <i class={classes!("ui", "circular", "magnet", "icon", if *show_omni_editor { "green" } else { "blue" })} onclick={let show_omni_editor = show_omni_editor.clone(); move |_| show_omni_editor.set(!*show_omni_editor)} title="Edit Magnet/Torrent"></i>
                 </div>
@@ -829,6 +1067,7 @@ fn app() -> Html {
                                             let size   = str_field("size");
                                             let seeds  = str_field("seeds");
                                             let peers  = str_field("peers");
+                                            let ui_error = ui_error.clone();
                                             html! {
                                                 <tr>
                                                     <td class="name">{ name }</td>
@@ -837,8 +1076,11 @@ fn app() -> Html {
                                                     <td>
                                                         <button class="ui tiny blue icon button" onclick={let magnet = magnet.clone(); Callback::from(move |_| {
                                                             let magnet = magnet.clone();
+                                                            let ui_error = ui_error.clone();
                                                             spawn_local(async move {
-                                                                let _ = Request::post("/api/magnet").body(magnet).unwrap().send().await;
+                                                                if let Err(err) = post_text_request("/api/magnet", magnet).await {
+                                                                    ui_error.set(Some(err));
+                                                                }
                                                             });
                                                         })}><i class="plus icon"></i></button>
                                                     </td>
@@ -848,6 +1090,170 @@ fn app() -> Html {
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    }
+
+                    if *show_rss {
+                        <div class="ui segment" id="rss_results">
+                            <div class="result_header">
+                                <span class="ui header">
+                                    <i class="rss square icon"></i>
+                                    {
+                                        if let Some(rss) = &*rss_state {
+                                            format!(" RSS ({})", rss.items.len())
+                                        } else {
+                                            " RSS".to_string()
+                                        }
+                                    }
+                                </span>
+                                <div style="float: right; display: flex; gap: 8px; align-items: center;">
+                                    <button
+                                        class={classes!("ui", "tiny", "teal", "button", if *rss_loading { "loading" } else { "" })}
+                                        onclick={let fetch_rss = fetch_rss.clone(); move |_| fetch_rss.emit(true)}
+                                    >
+                                        <i class="redo icon"></i>
+                                        { "Refresh" }
+                                    </button>
+                                    <i
+                                        class="close icon close_icon"
+                                        style="cursor: pointer;"
+                                        onclick={let show_rss = show_rss.clone(); move |_| show_rss.set(false)}
+                                    ></i>
+                                </div>
+                            </div>
+
+                            <div class="ui form" style="margin-bottom: 16px;">
+                                <div class="field">
+                                    <label>{ "RSS Subscriptions" }</label>
+                                    <textarea
+                                        rows="4"
+                                        placeholder="One RSS feed URL per line"
+                                        value={(*rss_input).clone()}
+                                        disabled={*rss_config_loading || *rss_config_saving}
+                                        oninput={let rss_input = rss_input.clone(); Callback::from(move |e: InputEvent| {
+                                            let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                            rss_input.set(input.value());
+                                        })}
+                                    />
+                                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+                                        <button
+                                            class={classes!("ui", "tiny", "blue", "button", if *rss_config_saving { "loading" } else { "" })}
+                                            disabled={*rss_config_loading || *rss_config_saving}
+                                            onclick={save_rss_subscriptions.clone()}
+                                        >
+                                            <i class="save icon"></i>
+                                            { "Save Feeds" }
+                                        </button>
+                                        <button
+                                            class="ui tiny button"
+                                            type="button"
+                                            onclick={let show_config = show_config.clone(); move |_| show_config.set(true)}
+                                        >
+                                            <i class="settings icon"></i>
+                                            { "Full Settings" }
+                                        </button>
+                                        if *rss_config_loading {
+                                            <span class="ui tiny text">{ "Loading RSS settings..." }</span>
+                                        } else {
+                                            <span class="ui tiny text">{ "Save applies the new feed list immediately." }</span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                            if let Some(rss) = &*rss_state {
+                                <div style="margin-bottom: 10px;">
+                                    <span class="ui tiny label">
+                                        <i class="rss icon"></i>
+                                        { format!("Feeds: {}", rss.feed_count) }
+                                    </span>
+                                    if rss.last_updated > 0 {
+                                        <span class="ui tiny label">
+                                            <i class="clock outline icon"></i>
+                                            { format!("Updated {}", format_timestamp(rss.last_updated)) }
+                                        </span>
+                                    }
+                                </div>
+
+                                if !rss.last_error.is_empty() {
+                                    <div class="ui warning message">
+                                        <pre style="white-space: pre-wrap; margin: 0;">{ rss.last_error.clone() }</pre>
+                                    </div>
+                                }
+
+                                if rss.items.is_empty() && !*rss_loading {
+                                    <div class="ui message">
+                                        <p>{ "No RSS items yet. Configure one or more RSS URLs and refresh." }</p>
+                                    </div>
+                                } else {
+                                    <div class="results">
+                                        <table class="ui unstackable compact striped table">
+                                            <thead>
+                                                <tr>
+                                                    <th>{ "Name" }</th>
+                                                    <th>{ "Feed" }</th>
+                                                    <th>{ "Published" }</th>
+                                                    <th>{ "Action" }</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                { for rss.items.iter().map(|item| {
+                                                    let link = item.link.clone();
+                                                    let load_url = item.load_url.clone();
+                                                    let item_id = item.id.clone();
+                                                    let rss_state = rss_state.clone();
+                                                    let ui_error = ui_error.clone();
+                                                    let is_magnet = load_url.starts_with("magnet:");
+                                                    html! {
+                                                        <tr>
+                                                            <td class="name">
+                                                                if link.starts_with("http://") || link.starts_with("https://") {
+                                                                    <a href={link} target="_blank">{ item.title.clone() }</a>
+                                                                } else {
+                                                                    <>
+                                                                        { item.title.clone() }
+                                                                    </>
+                                                                }
+                                                                if item.is_new {
+                                                                    <span class="ui tiny teal label" style="margin-left: 8px;">{ "new" }</span>
+                                                                }
+                                                            </td>
+                                                            <td>{ if item.source_title.is_empty() { item.source_url.clone() } else { item.source_title.clone() } }</td>
+                                                            <td>{ if item.published.is_empty() { "-".to_string() } else { item.published.clone() } }</td>
+                                                            <td>
+                                                                <button
+                                                                    class={classes!("ui", "tiny", if item.loaded { "green" } else { "blue" }, "icon", "button")}
+                                                                    disabled={item.loaded}
+                                                                    onclick={Callback::from(move |_| {
+                                                                        let load_url = load_url.clone();
+                                                                        let item_id = item_id.clone();
+                                                                        let rss_state = rss_state.clone();
+                                                                        let ui_error = ui_error.clone();
+                                                                        spawn_local(async move {
+                                                                            match post_rss_load_request(item_id, load_url).await {
+                                                                                Ok(snapshot) => rss_state.set(Some(snapshot)),
+                                                                                Err(err) => ui_error.set(Some(err)),
+                                                                            }
+                                                                        });
+                                                                    })}
+                                                                >
+                                                                    <i class={if item.loaded { "check icon" } else if is_magnet { "magnet icon" } else { "file download icon" }}></i>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                }) }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            } else if *rss_loading {
+                                <div class="ui active centered inline loader"></div>
+                            } else {
+                                <div class="ui message">
+                                    <p>{ "No RSS data loaded yet." }</p>
+                                </div>
+                            }
                         </div>
                     }
 

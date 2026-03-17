@@ -1,10 +1,12 @@
 use crate::engine::Engine;
+use crate::server::rss::RssService;
 use axum::extract::FromRef;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub struct AppState {
     pub engine: Engine,
+    pub rss: Arc<RssService>,
     pub expected_auth: Option<String>,
     pub sys: tokio::sync::Mutex<sysinfo::System>,
 }

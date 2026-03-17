@@ -566,7 +566,7 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "cloud-torrent"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -585,6 +585,7 @@ dependencies = [
  "md5",
  "mime_guess",
  "openssl",
+ "quick-xml",
  "redb",
  "regex",
  "reqwest 0.13.2",
@@ -609,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-torrent-common"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -617,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-torrent-frontend"
-version = "1.0.4"
+version = "1.0.7"
 dependencies = [
  "chrono",
  "cloud-torrent-common",

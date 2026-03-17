@@ -70,9 +70,43 @@ pub struct GlobalState {
     pub use_queue: bool,
     #[serde(rename = "LatestRSSGuid")]
     pub latest_rss_guid: String,
+    #[serde(default)]
+    pub rss_last_error: String,
     pub torrents: Vec<Torrent>,
     pub users: HashMap<String, serde_json::Value>,
     pub stats: Stats,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct RssItem {
+    pub id: String,
+    pub title: String,
+    pub link: String,
+    pub load_url: String,
+    pub source_title: String,
+    pub source_url: String,
+    pub published: String,
+    #[serde(default)]
+    pub published_ts: i64,
+    #[serde(default)]
+    pub is_new: bool,
+    #[serde(default)]
+    pub loaded: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct RssSnapshot {
+    pub items: Vec<RssItem>,
+    #[serde(default)]
+    pub latest_guid: String,
+    #[serde(default)]
+    pub last_updated: i64,
+    #[serde(default)]
+    pub last_error: String,
+    #[serde(default)]
+    pub feed_count: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]

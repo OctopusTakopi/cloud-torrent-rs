@@ -12,6 +12,8 @@ pub enum AppError {
     Internal(#[from] anyhow::Error),
     #[error("Not Found: {0}")]
     NotFound(String),
+    #[error("Insufficient Storage: {0}")]
+    InsufficientStorage(String),
 }
 
 impl IntoResponse for AppError {
@@ -19,6 +21,7 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             AppError::Internal(ref e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             AppError::NotFound(ref e) => (StatusCode::NOT_FOUND, e.clone()),
+            AppError::InsufficientStorage(ref e) => (StatusCode::INSUFFICIENT_STORAGE, e.clone()),
         };
 
         let body = Json(serde_json::json!({
@@ -50,4 +53,16 @@ pub struct SearchQuery {
 #[derive(Deserialize)]
 pub struct MagnetQuery {
     pub m: String,
+}
+
+#[derive(Deserialize, Default)]
+pub struct RssQuery {
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Deserialize)]
+pub struct RssLoadRequest {
+    pub item_id: String,
+    pub load_url: String,
 }

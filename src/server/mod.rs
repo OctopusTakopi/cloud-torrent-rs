@@ -1,5 +1,6 @@
 pub mod handlers;
 pub mod middleware;
+pub mod rss;
 pub mod scraper;
 pub mod state;
 pub mod types;
@@ -16,6 +17,7 @@ use tower_http::cors::CorsLayer;
 
 use self::handlers::*;
 use self::middleware::auth_middleware;
+use self::rss::{RSS_REFRESH_INTERVAL_SECS, RssService};
 use self::state::{AppState, SharedState};
 
 #[derive(RustEmbed)]
@@ -46,6 +48,13 @@ pub async fn run(
     sys.refresh_all();
 
     let state = Arc::new(AppState {
+        rss: Arc::new(RssService::new(
+            engine
+                .storage
+                .load_rss_state()
+                .unwrap_or_default()
+                .unwrap_or_default(),
+        )),
         engine,
         expected_auth,
         sys: tokio::sync::Mutex::new(sys),
@@ -58,10 +67,31 @@ pub async fn run(
         }
     });
 
+    let state_for_rss = state.clone();
+    let broadcast_tx_for_rss = broadcast_tx.clone();
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(RSS_REFRESH_INTERVAL_SECS));
+
+        let initial = state_for_rss.rss.refresh(&state_for_rss.engine).await;
+        if initial.changed {
+            let _ = broadcast_tx_for_rss.send(());
+        }
+
+        loop {
+            interval.tick().await;
+            let outcome = state_for_rss.rss.refresh(&state_for_rss.engine).await;
+            if outcome.changed {
+                let _ = broadcast_tx_for_rss.send(());
+            }
+        }
+    });
+
     let app: Router<()> = Router::<SharedState>::new()
         .route("/sync", get(sync_handler))
         .route("/sync/ws", get(sync_ws_handler))
         .route("/rss", get(api_rss))
+        .route("/api/rss/load", post(api_rss_load))
         .route("/api/magnet", get(api_magnet_get).post(api_magnet_post))
         .route(
             "/api/configure",
