@@ -1,4 +1,5 @@
 # Cloud Torrent-rs
+
 ![demo](demo.gif)
 
 [![release build](https://github.com/OctopusTakopi/cloud-torrent-rs/actions/workflows/build-release.yml/badge.svg)](https://github.com/OctopusTakopi/cloud-torrent-rs/actions/workflows/build-release.yml)
@@ -17,6 +18,7 @@ This project is a Rust reimplementation of [SimpleTorrent](https://github.com/bo
 The original Go-based implementations of Cloud-Torrent and Simple-Torrent frequently suffer from race conditions and crashes and internal state corruption.
 
 **Cloud-Torrent-rs** was built to solve this:
+
 - **Rust Reliability**: Leverages Rust's memory safety and strict ownership model to eliminate data races and common crash patterns.
 - **Modern Core**: Built on [librqbit](https://github.com/ikatson/rqbit), a modern, high-performance BitTorrent engine.
 - **Improved Stability**: Designed for 24/7 self-hosting with predictable memory usage and robust error handling.
@@ -53,21 +55,21 @@ bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-r
 To install a specific version:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-rs/master/scripts/quickinstall.sh) v1.0.7
+bash <(wget -qO- https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-rs/master/scripts/quickinstall.sh) v1.0.8
 ```
 
-The script installs the binary to `/usr/local/bin/cloud-torrent` and registers a systemd service.  
+The script installs the binary to `/usr/local/bin/cloud-torrent` and registers a systemd service.
 Read more: [Auth And Security](https://github.com/OctopusTakopi/cloud-torrent-rs/wiki/AuthSecurity)
 
 ### Binary
 
 Download a pre-built binary from the [latest release](https://github.com/OctopusTakopi/cloud-torrent-rs/releases/latest).
 
-| Platform | Binary |
-|---|---|
+| Platform              | Binary                                  |
+| --------------------- | --------------------------------------- |
 | Linux x86_64 (static) | `cloud-torrent_linux_amd64_static.gz` |
-| Linux ARM64 | `cloud-torrent_linux_arm64.gz` |
-| Windows x86_64 | `cloud-torrent_windows_amd64.exe.gz` |
+| Linux ARM64           | `cloud-torrent_linux_arm64.gz`        |
+| Windows x86_64        | `cloud-torrent_windows_amd64.exe.gz`  |
 
 ### Docker
 
@@ -145,7 +147,7 @@ See full documentation: [Command-line Options](https://github.com/OctopusTakopi/
 
 ## Configuration
 
-On first run, `cloud-torrent.yaml` is created in the working directory with defaults.  
+On first run, `cloud-torrent.yaml` is created in the working directory with defaults.
 You can edit it directly or change most settings live via the web UI.
 
 See: [Config File wiki](https://github.com/OctopusTakopi/cloud-torrent-rs/wiki/Config-File)
@@ -154,7 +156,7 @@ See: [Config File wiki](https://github.com/OctopusTakopi/cloud-torrent-rs/wiki/C
 
 ## Reverse Proxy
 
-Cloud Torrent-rs works cleanly behind Nginx, Caddy, or Apache2.  
+Cloud Torrent-rs works cleanly behind Nginx, Caddy, or Apache2.
 See: [Behind WebServer (reverse proxying)](https://github.com/OctopusTakopi/cloud-torrent-rs/wiki/ReverseProxy)
 
 ---

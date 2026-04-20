@@ -11,7 +11,9 @@ use web_sys::{Event as JsEvent, FileReader};
 use yew::prelude::*;
 
 fn copy_text_to_clipboard(text: &str) {
-    let Some(window) = web_sys::window() else { return };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
 
     let clipboard = window.navigator().clipboard();
     if !wasm_bindgen::JsValue::from(&clipboard).is_undefined() {
@@ -19,10 +21,16 @@ fn copy_text_to_clipboard(text: &str) {
         return;
     }
 
-    let Some(document) = window.document() else { return };
+    let Some(document) = window.document() else {
+        return;
+    };
     let Some(body) = document.body() else { return };
-    let Ok(el) = document.create_element("textarea") else { return };
-    let Ok(textarea) = el.dyn_into::<web_sys::HtmlTextAreaElement>() else { return };
+    let Ok(el) = document.create_element("textarea") else {
+        return;
+    };
+    let Ok(textarea) = el.dyn_into::<web_sys::HtmlTextAreaElement>() else {
+        return;
+    };
     textarea.set_value(text);
     textarea.set_read_only(true);
     let style = textarea.style();
