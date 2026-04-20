@@ -10,6 +10,35 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event as JsEvent, FileReader};
 use yew::prelude::*;
 
+fn copy_text_to_clipboard(text: &str) {
+    let Some(window) = web_sys::window() else { return };
+
+    let clipboard = window.navigator().clipboard();
+    if !wasm_bindgen::JsValue::from(&clipboard).is_undefined() {
+        let _ = clipboard.write_text(text);
+        return;
+    }
+
+    let Some(document) = window.document() else { return };
+    let Some(body) = document.body() else { return };
+    let Ok(el) = document.create_element("textarea") else { return };
+    let Ok(textarea) = el.dyn_into::<web_sys::HtmlTextAreaElement>() else { return };
+    textarea.set_value(text);
+    textarea.set_read_only(true);
+    let style = textarea.style();
+    let _ = style.set_property("position", "fixed");
+    let _ = style.set_property("left", "-9999px");
+    let _ = style.set_property("top", "0");
+    if body.append_child(&textarea).is_err() {
+        return;
+    }
+    textarea.select();
+    if let Ok(html_doc) = document.dyn_into::<web_sys::HtmlDocument>() {
+        let _ = html_doc.exec_command("copy");
+    }
+    let _ = body.remove_child(&textarea);
+}
+
 #[derive(Properties, PartialEq)]
 pub struct FileNodeProps {
     pub node: Value,
@@ -1439,9 +1468,7 @@ fn app() -> Html {
                                                         <button class="ui teal right labeled icon button" onclick={
                                                             let magnet = t.magnet.clone();
                                                             Callback::from(move |_| {
-                                                                if let Some(clipboard) = web_sys::window().map(|w| w.navigator().clipboard()) {
-                                                                    let _ = clipboard.write_text(&magnet);
-                                                                }
+                                                                copy_text_to_clipboard(&magnet);
                                                             })
                                                         }>
                                                             <i class="copy icon"></i>
