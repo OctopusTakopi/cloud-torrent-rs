@@ -192,8 +192,8 @@ impl Engine {
                 if !config.incomplete_suffix.is_empty() {
                     let already_done = suffix_state.get(&info_hash).copied();
                     let needs_action = match (stats.finished, already_done) {
-                        (true, Some(true)) => false,   // already stripped
-                        (false, Some(false)) => false,  // already suffixed
+                        (true, Some(true)) => false,  // already stripped
+                        (false, Some(false)) => false, // already suffixed
                         _ => true,
                     };
                     if needs_action {
