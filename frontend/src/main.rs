@@ -356,6 +356,20 @@ fn config_panel(props: &ConfigPanelProps) -> Html {
                 </div>
 
                 <div class="field">
+                    <label><h5>{ "Incomplete File Suffix " } <span title="Append this suffix (e.g. .partial) to files while downloading. Removed when complete. Allows external tools to distinguish incomplete files."><i class="question circle icon"></i></span></h5></label>
+                    <input type="text" placeholder=".partial" value={c.incomplete_suffix.clone()} oninput={
+                        let config = config.clone();
+                        Callback::from(move |e: InputEvent| {
+                            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                            if let Some(mut c) = (*config).clone() {
+                                c.incomplete_suffix = input.value();
+                                config.set(Some(c));
+                            }
+                        })
+                    } />
+                </div>
+
+                <div class="field">
                     <label><h5>{ "Scraper URL" }</h5></label>
                     <input type="text" value={c.scraper_url.clone()} oninput={
                         let config = config.clone();
@@ -639,6 +653,21 @@ fn app() -> Html {
             });
         })
     };
+
+    {
+        let finished_count = (*state)
+            .as_ref()
+            .map(|gs| gs.torrents.iter().filter(|t| t.is_seeding).count())
+            .unwrap_or(0);
+        let downloads_expanded = downloads_expanded.clone();
+        let refresh_files = refresh_files.clone();
+        use_effect_with(finished_count, move |_| {
+            if *downloads_expanded {
+                refresh_files.emit(());
+            }
+            || ()
+        });
+    }
 
     let fetch_rss = {
         let rss_loading = rss_loading.clone();
@@ -1485,14 +1514,26 @@ fn app() -> Html {
                                                     </div>
                                                     <table class="ui unstackable compact striped downloads table">
                                                         <thead>
-                                                            <tr><th>{ "File" }</th><th>{ "Size" }</th></tr>
+                                                            <tr><th>{ "File" }</th><th>{ "Size" }</th><th>{ "Progress" }</th></tr>
                                                         </thead>
                                                         <tbody>
-                                                            { for t.files.iter().map(|f| html! {
+                                                            { for t.files.iter().map(|f| {
+                                                                let pct = f.get("Percent").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                                                let downloaded = f.get("Downloaded").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                                let size = f.get("Size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                                let is_done = pct >= 100.0;
+                                                                html! {
                                                                 <tr>
                                                                     <td>{ f.get("Path").and_then(|v| v.as_str()).unwrap_or("?") }</td>
-                                                                    <td>{ format_bytes(f.get("Size").and_then(|v| v.as_u64()).unwrap_or(0)) }</td>
+                                                                    <td class="right aligned collapsing">{ format_bytes(size) }</td>
+                                                                    <td class="collapsing" style="min-width: 140px;">
+                                                                        <div class={classes!("ui", "tiny", if is_done { "green" } else { "blue" }, "progress")} style="margin: 0; position: relative;" title={format!("{} / {}", format_bytes(downloaded), format_bytes(size))}>
+                                                                            <div class="bar" style={format!("width: {}%; min-width: 0;", if pct < 1.0 && pct > 0.0 { 1.0 } else { pct })}></div>
+                                                                            <div style="position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.7em; line-height: 1.5em; color: rgba(0,0,0,0.7); pointer-events: none;">{ format!("{:.1}%", pct) }</div>
+                                                                        </div>
+                                                                    </td>
                                                                 </tr>
+                                                                }
                                                             }) }
                                                         </tbody>
                                                     </table>

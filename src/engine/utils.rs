@@ -147,3 +147,66 @@ fn format_bytes_for_error(bytes: u64) -> String {
     }
     format!("{value:.2} {}", units[unit])
 }
+
+pub fn strip_incomplete_suffix_recursive(dir: &Path, suffix: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            strip_incomplete_suffix_recursive(&path, suffix);
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && let Some(base) = name.strip_suffix(suffix)
+        {
+            let dest = path.with_file_name(base);
+            if !dest.exists() {
+                if let Err(e) = std::fs::rename(&path, &dest) {
+                    tracing::error!(
+                        "Failed to strip incomplete suffix from {}: {}",
+                        path.display(),
+                        e
+                    );
+                } else {
+                    tracing::info!(
+                        "Stripped incomplete suffix: {} -> {}",
+                        path.display(),
+                        dest.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+pub fn add_incomplete_suffix(download_dir: &Path, relative_path: &str, suffix: &str) {
+    let src = download_dir.join(relative_path);
+    if src.exists() {
+        let dest_name = format!("{}{}", relative_path, suffix);
+        let dest = download_dir.join(&dest_name);
+        if !dest.exists()
+            && let Err(e) = std::fs::rename(&src, &dest)
+        {
+            tracing::error!(
+                "Failed to add incomplete suffix to {}: {}",
+                src.display(),
+                e
+            );
+        }
+    }
+}
+
+pub fn strip_incomplete_suffix(download_dir: &Path, relative_path: &str, suffix: &str) {
+    let suffixed_name = format!("{}{}", relative_path, suffix);
+    let src = download_dir.join(&suffixed_name);
+    if src.exists() {
+        let dest = download_dir.join(relative_path);
+        if let Err(e) = std::fs::rename(&src, &dest) {
+            tracing::error!(
+                "Failed to strip incomplete suffix from {}: {}",
+                src.display(),
+                e
+            );
+        }
+    }
+}

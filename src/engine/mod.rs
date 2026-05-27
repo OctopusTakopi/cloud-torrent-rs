@@ -105,6 +105,16 @@ impl Engine {
             storage,
         };
 
+        // Strip incomplete suffix from files before restore so librqbit can find them
+        {
+            let state = engine.state.read().await;
+            let suffix = &state.config.incomplete_suffix;
+            if !suffix.is_empty() {
+                let dl_path = Path::new(&state.config.download_directory);
+                strip_incomplete_suffix_recursive(dl_path, suffix);
+            }
+        }
+
         // Background manager loop
         let engine_clone = engine.clone();
         tokio::spawn(async move {
@@ -119,6 +129,9 @@ impl Engine {
 
     async fn manager_loop(&self) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        // Tracks whether each torrent has had the incomplete suffix added (false) or
+        // stripped on completion (true). Absent = not yet handled.
+        let mut suffix_state: HashMap<String, bool> = HashMap::new();
         loop {
             interval.tick().await;
             let config = self.get_config().await;
@@ -173,6 +186,44 @@ impl Engine {
                         );
                         let _ = self.session.pause(&h).await;
                         continue;
+                    }
+                }
+
+                if !config.incomplete_suffix.is_empty() {
+                    let already_done = suffix_state.get(&info_hash).copied();
+                    let needs_action = match (stats.finished, already_done) {
+                        (true, Some(true)) => false,   // already stripped
+                        (false, Some(false)) => false,  // already suffixed
+                        _ => true,
+                    };
+                    if needs_action {
+                        let metadata_guard = h.metadata.load();
+                        if let Some(meta) = metadata_guard.as_ref() {
+                            let download_dir = Path::new(&config.download_directory);
+                            let output_dir = if meta.file_infos.len() >= 2 {
+                                let name = h.name().unwrap_or_else(|| info_hash.clone());
+                                download_dir.join(name)
+                            } else {
+                                download_dir.to_path_buf()
+                            };
+                            for f in &meta.file_infos {
+                                let rel = f.relative_filename.to_string_lossy();
+                                if stats.finished {
+                                    strip_incomplete_suffix(
+                                        &output_dir,
+                                        &rel,
+                                        &config.incomplete_suffix,
+                                    );
+                                } else {
+                                    add_incomplete_suffix(
+                                        &output_dir,
+                                        &rel,
+                                        &config.incomplete_suffix,
+                                    );
+                                }
+                            }
+                            suffix_state.insert(info_hash.clone(), stats.finished);
+                        }
                     }
                 }
 
@@ -781,10 +832,19 @@ impl Engine {
                 let mut files = vec![];
                 let metadata_guard = h.metadata.load();
                 if let Some(meta) = metadata_guard.as_ref() {
-                    for f in &meta.file_infos {
+                    let file_progress = &stats.file_progress;
+                    for (i, f) in meta.file_infos.iter().enumerate() {
+                        let have_bytes = file_progress.get(i).copied().unwrap_or(0);
+                        let pct = if f.len > 0 {
+                            (have_bytes as f64 / f.len as f64) * 100.0
+                        } else {
+                            100.0
+                        };
                         files.push(serde_json::json!({
                             "Path": f.relative_filename.to_string_lossy(),
                             "Size": f.len,
+                            "Downloaded": have_bytes,
+                            "Percent": (pct * 10.0).round() / 10.0,
                         }));
                     }
                 }

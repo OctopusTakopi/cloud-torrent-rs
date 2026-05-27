@@ -144,6 +144,8 @@ pub struct Config {
     #[serde(alias = "rss_url", alias = "rssurl", alias = "RSSURL")]
     pub rss_url: String,
     pub allow_runtime_configure: bool,
+    #[serde(default)]
+    pub incomplete_suffix: String,
 }
 
 impl Default for Config {
@@ -177,6 +179,7 @@ impl Default for Config {
             scraper_url: "https://raw.githubusercontent.com/OctopusTakopi/cloud-torrent-rs/master/scraper-config.json".to_string(),
             rss_url: "".to_string(),
             allow_runtime_configure: true,
+            incomplete_suffix: String::new(),
         }
     }
 }
